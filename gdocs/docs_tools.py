@@ -2702,6 +2702,7 @@ async def get_doc_as_markdown(
     include_resolved: bool = False,
     suggestions_view_mode: str = "DEFAULT_FOR_CURRENT_ACCESS",
     tab_id: Optional[str] = None,
+    include_colors: bool = False,
 ) -> str:
     """
     Reads a Google Doc and returns it as clean Markdown with optional comment context.
@@ -2735,6 +2736,12 @@ async def get_doc_as_markdown(
             When omitted, every tab is rendered. Pass "" to read every tab of a
             URL that carries ?tab=. This filters output only: the whole document
             is still fetched.
+        include_colors: Annotate runs that carry an explicit foreground text
+            color with a trailing "[color: #rrggbb]" marker, matching the
+            "[heading: ...]"/"[tab: ...]" annotation style already used for
+            internal links. Defaults to False, so existing output is
+            unchanged unless you opt in. Runs colored via a theme color
+            rather than a fixed RGB value are not annotated.
 
     Returns:
         str: The document content as Markdown, optionally with comments
@@ -2787,7 +2794,7 @@ async def get_doc_as_markdown(
         # tab so it renders without a tab heading.
         doc = {**doc, "tabs": [{k: v for k, v in tab.items() if k != "childTabs"}]}
 
-    markdown = convert_doc_to_markdown(doc)
+    markdown = convert_doc_to_markdown(doc, include_colors=include_colors)
     if notice:
         markdown = f"*{notice}*\n\n{markdown}"
 
