@@ -8,6 +8,8 @@ of Google Docs documents, including finding tables, cells, and other elements.
 import logging
 from typing import Any, Optional
 
+from core.utils import UserInputError
+
 logger = logging.getLogger(__name__)
 
 # Limit returned ranges; the count remains exact.
@@ -445,3 +447,135 @@ def analyze_document_complexity(doc_data: dict[str, Any]) -> dict[str, Any]:
         )
 
     return stats
+
+
+def body_content_for_tab(
+    doc: dict[str, Any], tab_id: Optional[str] = None
+) -> list[dict[str, Any]]:
+    """Return the ``body.content`` list for the body of ``tab_id``.
+
+    Single-tab documents return the top-level body (or ``tabs[0]`` when the
+    top-level body is absent). Multi-tab documents require ``tab_id``; a
+    ``UserInputError`` lists the available IDs otherwise. ``documents.get``
+    must be called with ``includeTabsContent=True`` for the tab path.
+    """
+    tabs = doc.get("tabs") or []
+    if len(tabs) > 1:
+        if tab_id is None:
+            available = [t.get("tabProperties", {}).get("tabId", "?") for t in tabs]
+            raise UserInputError(
+                f"Document has {len(tabs)} tabs; tab_id is required. "
+                f"Available tab IDs: {available}"
+            )
+        for tab in tabs:
+            if tab.get("tabProperties", {}).get("tabId") == tab_id:
+                return tab.get("documentTab", {}).get("body", {}).get("content", [])
+        raise UserInputError(f"tab_id {tab_id!r} not found in document.")
+    body_content = doc.get("body", {}).get("content")
+    if body_content:
+        return body_content
+    if tabs:
+        return tabs[0].get("documentTab", {}).get("body", {}).get("content", [])
+    return []
+
+
+def _paragraph_heading_level(paragraph: dict[str, Any]) -> Optional[int]:
+    """Return 1-6 for a ``HEADING_N`` paragraph, otherwise ``None``."""
+    style = paragraph.get("paragraphStyle", {}).get("namedStyleType", "NORMAL_TEXT")
+    if style.startswith("HEADING_"):
+        try:
+            return int(style.split("_", 1)[1])
+        except ValueError:
+            return None
+    return None
+
+
+def find_heading_section(
+    doc: dict[str, Any],
+    heading: str,
+    heading_level: Optional[int] = None,
+    tab_id: Optional[str] = None,
+) -> dict[str, Any]:
+    """Locate a body heading paragraph and the section it introduces.
+
+    The first paragraph whose visible text equals ``heading`` (case-sensitive,
+    trailing newline ignored) and whose style is ``HEADING_N`` (``N ==
+    heading_level`` when given) is the match. Its section body runs from the
+    end of the heading paragraph to the start of the next ``TITLE`` or
+    equal-or-shallower heading paragraph, or to the last body paragraph's
+    final (undeletable) newline when no such heading follows.
+
+    Returns a dict with:
+      ``heading_start`` / ``heading_end`` - the heading paragraph's range
+      ``body_start`` - index where section content begins (== heading_end)
+      ``section_end`` - index where the section ends; may be < body_start when
+        the heading is the last paragraph (empty body before the protected
+        trailing newline)
+      ``last_paragraph`` - the paragraph element containing ``section_end``
+        (used to decide whether an insert lands mid-paragraph)
+      ``footnote_refs`` - count of footnote references inside the body range
+
+    Only body paragraphs are searched: headings inside tables, footnotes,
+    headers and footers are not addressable.
+    """
+    content = body_content_for_tab(doc, tab_id)
+
+    match_idx: Optional[int] = None
+    for idx, element in enumerate(content):
+        paragraph = element.get("paragraph")
+        if not paragraph:
+            continue
+        level = _paragraph_heading_level(paragraph)
+        if level is None or (heading_level is not None and level != heading_level):
+            continue
+        if _extract_paragraph_text(paragraph).rstrip("\n") == heading:
+            match_idx = idx
+            break
+
+    if match_idx is None:
+        raise UserInputError(
+            f"No heading matching {heading!r} found in the document body "
+            f"(heading_level={heading_level!r}, tab_id={tab_id!r}). Headings inside "
+            "tables, footnotes, headers and footers are not addressable by heading; "
+            "use index-based editing for those."
+        )
+
+    matched = content[match_idx]
+    matched_level = _paragraph_heading_level(matched["paragraph"])
+    heading_start = int(matched.get("startIndex", 0))
+    heading_end = int(matched.get("endIndex", heading_start + 1))
+
+    section_end: Optional[int] = None
+    last_paragraph = matched
+    for element in content[match_idx + 1 :]:
+        paragraph = element.get("paragraph")
+        if not paragraph:
+            continue
+        style = paragraph.get("paragraphStyle", {}).get("namedStyleType", "NORMAL_TEXT")
+        level = _paragraph_heading_level(paragraph)
+        if style == "TITLE" or (level is not None and level <= matched_level):
+            section_end = int(element.get("startIndex", 0))
+            break
+        last_paragraph = element
+
+    if section_end is None:
+        # No terminating heading: stop before the body's final newline, which
+        # the Docs API refuses to delete.
+        section_end = int(last_paragraph.get("endIndex", heading_end)) - 1
+
+    footnote_refs = 0
+    for element in content[match_idx + 1 :]:
+        for run in element.get("paragraph", {}).get("elements", []):
+            run_start = run.get("startIndex")
+            if "footnoteReference" in run and run_start is not None:
+                if heading_end <= int(run_start) < section_end:
+                    footnote_refs += 1
+
+    return {
+        "heading_start": heading_start,
+        "heading_end": heading_end,
+        "body_start": heading_end,
+        "section_end": section_end,
+        "last_paragraph": last_paragraph,
+        "footnote_refs": footnote_refs,
+    }

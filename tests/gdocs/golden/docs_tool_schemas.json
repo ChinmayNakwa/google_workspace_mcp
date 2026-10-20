@@ -11,8 +11,16 @@
         "description": "ID of the document to update"
       },
       "start_index": {
-        "type": "integer",
-        "description": "Start position for operation using Docs API indices from\ninspect_doc_structure. For the main body, 0 is also accepted as an\nalias for the first writable position."
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Start position for operation using Docs API indices from\ninspect_doc_structure. For the main body, 0 is also accepted as an\nalias for the first writable position. Required unless heading is set."
       },
       "end_index": {
         "anyOf": [
@@ -36,7 +44,31 @@
           }
         ],
         "default": null,
-        "description": "New text to insert or replace with (optional - can format existing text without changing it)"
+        "description": "New text to insert or replace with (optional - can format existing text without changing it).\nRendered as Markdown when heading is set."
+      },
+      "heading": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Visible text of a body heading (case-sensitive) whose section to edit,\ninstead of start_index/end_index. text is rendered as Markdown and replaces\nthe section content below the heading (end_of_segment=true appends instead);\nformatting parameters without text apply to the whole section."
+      },
+      "heading_level": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Optional 1-6 to require a specific heading level when matching heading"
       },
       "tab_id": {
         "anyOf": [
@@ -48,7 +80,7 @@
           }
         ],
         "default": null,
-        "description": "Optional document tab ID to target"
+        "description": "Optional document tab ID to target (required with heading when the doc has multiple tabs)"
       },
       "segment_id": {
         "anyOf": [
@@ -226,8 +258,7 @@
     },
     "required": [
       "user_google_email",
-      "document_id",
-      "start_index"
+      "document_id"
     ],
     "type": "object"
   },

@@ -125,7 +125,7 @@ For parameters: [references/calendar.md](references/calendar.md)
 | Read doc content (raw) | `get_doc_content` |
 | Read plain text with link/chip targets and document segments | `get_doc_content(preserve_context=True)` |
 | Create new doc | `create_doc` |
-| Modify text / apply styles | `modify_doc_text` |
+| Modify text / apply styles (by index or by `heading`) | `modify_doc_text` |
 | Insert elements (tables, lists, breaks) | `insert_doc_elements` |
 | Insert image | `insert_doc_image` |
 | Create table with data | `create_table_with_data` |

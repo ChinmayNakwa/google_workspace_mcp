@@ -19,6 +19,11 @@ from typing import Optional
 
 from markdown_it import MarkdownIt
 
+from gdocs.docs_helpers import (
+    create_delete_bullet_list_request,
+    create_insert_text_request,
+)
+
 _NORMAL_TEXT = {"namedStyleType": "NORMAL_TEXT"}
 
 
@@ -423,3 +428,40 @@ def _append_spacer(
     requests.append(
         _build_paragraph_style(cursor[0] - 1, cursor[0], _NORMAL_TEXT, tab_id)
     )
+
+
+def build_markdown_insert_requests(
+    markdown_text: str,
+    insert_at: int,
+    tab_id: Optional[str] = None,
+    split_paragraph: bool = False,
+    drop_bullet: bool = False,
+) -> list[dict]:
+    """Build requests that insert rendered markdown at ``insert_at``.
+
+    ``split_paragraph`` - ``insert_at`` sits inside an existing paragraph (for
+    example just before the body's final newline), so a newline is inserted
+    first and the markdown starts in the new paragraph at ``insert_at + 1``.
+    Without it, paragraph styles emitted for the markdown would also restyle
+    the paragraph being split.
+    ``drop_bullet`` - the paragraph the markdown lands in carries a list
+    bullet; remove it so the first rendered paragraph does not inherit it.
+
+    Returns an empty list when the markdown renders to nothing.
+    """
+    content_start = insert_at + 1 if split_paragraph else insert_at
+    markdown_requests = markdown_to_docs_requests(
+        markdown_text, tab_id=tab_id, start_index=content_start
+    )
+    if not markdown_requests:
+        return []
+
+    requests: list[dict] = []
+    if split_paragraph:
+        requests.append(create_insert_text_request(insert_at, "\n", tab_id))
+    if drop_bullet:
+        requests.append(
+            create_delete_bullet_list_request(content_start, content_start + 1, tab_id)
+        )
+    requests.extend(markdown_requests)
+    return requests
