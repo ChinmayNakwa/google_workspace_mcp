@@ -1,20 +1,100 @@
 """
 Google Contacts Helper Functions
 
-This module provides pure utility functions for parsing, normalizing,
-formatting, and merging Google Contacts (People API) data. These helpers
-operate purely on plain dicts/strings and are kept separate from the MCP
-tool definitions and Pydantic input models in contacts_tools.py.
+This module provides listing, parsing, normalizing, formatting, and merging
+logic for Google Contacts (People API), separate from the MCP tool definitions
+and Pydantic input models in contacts_tools.py.
 """
 
+import asyncio
 import datetime
 import logging
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Union
+
+from googleapiclient.errors import HttpError
 
 from core.utils import UserInputError
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_PERSON_FIELDS = "names,nicknames,emailAddresses,phoneNumbers,organizations"
+
+
+async def _list_contacts(
+    service: Any,
+    user_google_email: str,
+    page_size: int = 100,
+    page_token: Optional[str] = None,
+    sort_order: Optional[str] = None,
+    request_sync_token: bool = False,
+    sync_token: Optional[str] = None,
+) -> Union[str, Dict[str, Any]]:
+    """Fetch one contacts page, preserving the text listing unless sync is requested."""
+    if page_size < 1:
+        raise UserInputError("page_size must be >= 1")
+    page_size = min(page_size, 1000)
+    syncing = request_sync_token or sync_token is not None
+    if sync_token is not None and not sync_token.strip():
+        raise UserInputError("sync_token must not be empty")
+    if syncing and sort_order is not None:
+        raise UserInputError("sort_order is not supported when syncing contacts")
+
+    params: Dict[str, Any] = {
+        "resourceName": "people/me",
+        "personFields": DEFAULT_PERSON_FIELDS,
+        "pageSize": page_size,
+    }
+    if page_token:
+        params["pageToken"] = page_token
+    if sort_order:
+        params["sortOrder"] = sort_order
+    if syncing:
+        params["personFields"] += ",metadata"
+        params["requestSyncToken"] = True
+        if sync_token is not None:
+            params["syncToken"] = sync_token
+
+    page: Dict[str, Any] = {
+        "account": user_google_email,
+        "contacts": [],
+        "page_size": page_size,
+        "next_page_token": None,
+        "next_sync_token": None,
+        "reset_required": False,
+    }
+    try:
+        result = await asyncio.to_thread(
+            service.people().connections().list(**params).execute
+        )
+    except HttpError as exc:
+        if sync_token is not None and exc.resp.status == 410:
+            page["reset_required"] = True
+            return page
+        raise
+
+    connections = result.get("connections", [])
+    logger.info("[list_contacts] Returned %d contacts", len(connections))
+    if syncing:
+        page.update(
+            contacts=connections,
+            next_page_token=result.get("nextPageToken"),
+            next_sync_token=result.get("nextSyncToken"),
+        )
+        return page
+
+    if not connections:
+        return f"No contacts found for {user_google_email}."
+    total_people = result.get("totalPeople", len(connections))
+    response = (
+        f"Contacts for {user_google_email} ({len(connections)} of {total_people}):\n\n"
+    )
+    for person in connections:
+        response += _format_contact(person) + "\n\n"
+    if result.get("nextPageToken"):
+        response += f"Next page token: {result['nextPageToken']}"
+    return response
+
 
 # Name fields the People API derives from the structured parts. Sending them
 # back alongside an edited part would conflict with (or override) the edit.

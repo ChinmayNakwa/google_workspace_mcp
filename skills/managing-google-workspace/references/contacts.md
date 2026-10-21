@@ -29,6 +29,24 @@ List contacts for the authenticated user.
 | page_size | integer | no | 100 | Max 1000 |
 | page_token | any | no | | Pagination token |
 | sort_order | string | no | | `LAST_MODIFIED_ASCENDING`, `LAST_MODIFIED_DESCENDING`, `FIRST_NAME_ASCENDING`, or `LAST_NAME_ASCENDING` |
+| request_sync_token | boolean | no | false | Start a full sync and return a structured page; keep true when following its pages |
+| sync_token | string | no | | Incremental sync from a previous `next_sync_token`; implies structured output |
+
+Without sync options, the existing text listing is unchanged. For a full sync,
+call `list_contacts` with `request_sync_token=true`, then follow
+`next_page_token` with the same flag and effective `page_size`. Save
+`next_sync_token` only after processing the final page. For later syncs, pass
+that token as `sync_token`; on continuation pages, reuse the original
+`sync_token` and `page_size`. `sort_order` is rejected in sync mode.
+
+Sync responses contain `account`, `contacts`, `page_size`, `next_page_token`,
+`next_sync_token`, and `reset_required`. Contacts are raw People API Person
+objects, including email/phone arrays and `metadata.deleted` tombstones.
+Empty pages still carry continuation tokens. Tokens are client-owned and are
+never stored by the server. On HTTP 410, `reset_required=true` signals that the
+client must start a new full sync; no full sync is performed implicitly.
+Sync tokens expire after seven days, and writes may take several minutes to
+appear in sync results. See the [People API sync contract](https://developers.google.com/people/api/rest/v1/people.connections/list).
 
 ### get_contact
 Get detailed information about a specific contact.
