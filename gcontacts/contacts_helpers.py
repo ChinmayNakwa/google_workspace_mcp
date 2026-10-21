@@ -21,6 +21,22 @@ logger = logging.getLogger(__name__)
 DEFAULT_PERSON_FIELDS = "names,nicknames,emailAddresses,phoneNumbers,organizations"
 
 
+def _is_expired_sync_token(exc: HttpError) -> bool:
+    """Recognize the People API expiry reason, retaining HTTP 410 as a fallback."""
+    status = getattr(exc.resp, "status", None)
+    if status == 410:
+        return True
+    if status != 400:
+        return False
+    # HttpError parses Google's error.details. Match the structured reason,
+    # rather than a substring in an unrelated error's free-text message.
+    details = getattr(exc, "error_details", None)
+    return isinstance(details, list) and any(
+        isinstance(detail, dict) and detail.get("reason") == "EXPIRED_SYNC_TOKEN"
+        for detail in details
+    )
+
+
 async def _list_contacts(
     service: Any,
     user_google_email: str,
@@ -68,7 +84,7 @@ async def _list_contacts(
             service.people().connections().list(**params).execute
         )
     except HttpError as exc:
-        if sync_token is not None and exc.resp.status == 410:
+        if sync_token is not None and _is_expired_sync_token(exc):
             page["reset_required"] = True
             return page
         raise

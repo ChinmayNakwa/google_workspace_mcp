@@ -43,8 +43,10 @@ Sync responses contain `account`, `contacts`, `page_size`, `next_page_token`,
 `next_sync_token`, and `reset_required`. Contacts are raw People API Person
 objects, including email/phone arrays and `metadata.deleted` tombstones.
 Empty pages still carry continuation tokens. Tokens are client-owned and are
-never stored by the server. On HTTP 410, `reset_required=true` signals that the
-client must start a new full sync; no full sync is performed implicitly.
+never stored by the server. A People API HTTP 400 error with the structured
+`ErrorInfo.reason` `EXPIRED_SYNC_TOKEN` (or the legacy HTTP 410 fallback) returns
+`reset_required=true`, signaling that the client must start a new full sync.
+Other HTTP 400 errors still propagate; no full sync is performed implicitly.
 Sync tokens expire after seven days, and writes may take several minutes to
 appear in sync results. See the [People API sync contract](https://developers.google.com/people/api/rest/v1/people.connections/list).
 
