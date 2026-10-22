@@ -111,7 +111,7 @@ Move rows from one sheet to another within the same spreadsheet. Preserves formu
 ## Formatting
 
 ### format_sheet_range
-Apply visual formatting to a range: colors, number formats, text wrapping, alignment, text styling, and cell merging.
+Apply visual formatting to a range: colors, number formats, text wrapping, alignment, text styling, cell merging, borders, and dropdown lists.
 
 | Parameter | Type | Required | Default | Notes |
 |-----------|------|----------|---------|-------|
@@ -130,6 +130,12 @@ Apply visual formatting to a range: colors, number formats, text wrapping, align
 | font_size | integer | no | | Size in points |
 | merge_cells | boolean | no | | `true` to merge, `false` to unmerge; merging keeps only the top-left value |
 | merge_type | string | no | | `MERGE_ALL` (default when merging), `MERGE_COLUMNS`, or `MERGE_ROWS`; implies a merge |
+| borders | string | no | | Sides to draw, comma-separated: `all`, `outer`, `inner`, `top`, `bottom`, `left`, `right`, `inner_horizontal`, `inner_vertical`. `none` removes all borders |
+| border_style | string | no | `SOLID` | `SOLID`, `SOLID_MEDIUM`, `SOLID_THICK`, `DASHED`, `DOTTED`, `DOUBLE`. Requires `borders` |
+| border_color | string | no | `#000000` | Hex `#RRGGBB`. Requires `borders` |
+| dropdown_values | string[] | no | | Turns each cell into a dropdown with these values |
+| dropdown_strict | boolean | no | `true` | `false` only warns on other input. Requires `dropdown_values` |
+| clear_dropdown | boolean | no | | Removes all data validation from the range, including checkboxes |
 
 ### manage_conditional_formatting
 Add, update, or delete conditional formatting rules.

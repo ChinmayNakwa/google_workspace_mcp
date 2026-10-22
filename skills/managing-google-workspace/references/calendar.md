@@ -63,7 +63,7 @@ Create, update, or delete a calendar event.
 | use_default_reminders | boolean | no | | Use account default reminders |
 | transparency | string | no | | `opaque` (busy) or `transparent` (free) |
 | visibility | string | no | | `default`, `public`, `private`, or `confidential` |
-| color_id | string | no | | Event color 1-11 (update only) |
+| color_id | string | no | | Event color by name or ID: `lavender` (1), `sage` (2), `grape` (3), `flamingo` (4), `banana` (5), `tangerine` (6), `peacock` (7), `graphite` (8), `blueberry` (9), `basil` (10), `tomato` (11) |
 | guests_can_modify | boolean | no | | Attendees can edit the event |
 | guests_can_invite_others | boolean | no | | Attendees can invite others |
 | guests_can_see_other_guests | boolean | no | | Attendees can see other attendees |
