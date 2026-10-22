@@ -544,6 +544,9 @@ async def create_doc(
     """
     Creates a new Google Doc and optionally inserts initial content.
 
+    `content` is inserted as plain text (Markdown is not rendered); use
+    import_to_google_doc to create a doc from Markdown.
+
     After creation, the document body starts at index 1. A new empty doc
     has total length 2 (one section break at index 0, one newline at index 1).
 
@@ -2268,6 +2271,7 @@ async def debug_table_structure(
     user_google_email: str,
     document_id: str,
     table_index: int = 0,
+    tab_id: Optional[str] = None,
 ) -> str:
     """
     ESSENTIAL DEBUGGING TOOL - Use this whenever tables don't work as expected.
@@ -2302,18 +2306,31 @@ async def debug_table_structure(
         user_google_email: User's Google email address
         document_id: ID of the document to inspect
         table_index: Which table to debug (0 = first table, 1 = second table, etc.)
+        tab_id: Optional ID of the tab containing the table (from inspect_doc_structure).
+            If not provided, inspects the first tab.
 
     Returns:
         str: Detailed JSON structure showing table layout, cell positions, and current content
     """
     logger.debug(
-        f"[debug_table_structure] Doc={document_id}, table_index={table_index}"
+        f"[debug_table_structure] Doc={document_id}, table_index={table_index}, "
+        f"tab_id={tab_id}"
     )
 
     # Get the document
     doc = await asyncio.to_thread(
-        service.documents().get(documentId=document_id).execute
+        service.documents()
+        .get(documentId=document_id, includeTabsContent=bool(tab_id))
+        .execute
     )
+
+    if tab_id:
+        tab = _find_tab(doc.get("tabs", []), tab_id)
+        if not tab:
+            return f"Error: Tab {tab_id} not found in document."
+        if "documentTab" not in tab:
+            return f"Error: Tab {tab_id} is not a document tab and has no body content."
+        doc = tab["documentTab"]
 
     # Find tables
     tables = find_tables(doc)

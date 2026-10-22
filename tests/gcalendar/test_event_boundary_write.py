@@ -20,8 +20,8 @@ import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
+from gcalendar.calendar_helpers import _build_time_boundary
 from gcalendar.calendar_tools import (
-    _build_time_boundary,
     _create_event_impl,
     _modify_event_impl,
     manage_event,

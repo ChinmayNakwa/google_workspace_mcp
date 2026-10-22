@@ -3,12 +3,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from gcalendar.calendar_tools import (
-    _build_time_boundary,
-    _create_event_impl,
-    _modify_event_impl,
-    _saved_event_times,
-)
+from gcalendar.calendar_helpers import _build_time_boundary, _saved_event_times
+from gcalendar.calendar_tools import _create_event_impl, _modify_event_impl
 
 
 @pytest.mark.parametrize("action", ["create", "update"])
