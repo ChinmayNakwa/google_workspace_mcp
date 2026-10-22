@@ -14,7 +14,7 @@ from mcp.types import ToolAnnotations
 
 from auth.service_decorator import require_google_service, require_multiple_services
 from core.server import server
-from core.utils import handle_http_errors
+from core.utils import UserInputError, handle_http_errors
 
 logger = logging.getLogger(__name__)
 
@@ -269,16 +269,15 @@ async def _read_comments_impl(
     """Implementation for reading comments from any Google Workspace file."""
     logger.info(f"[read_{app_name}_comments] Reading comments for {app_name} {file_id}")
 
+    if max_comments is not None and max_comments < 1:
+        raise UserInputError("max_comments must be a positive integer.")
     if max_comments is None:
         try:
             max_comments = int(os.getenv("WORKSPACE_MCP_COMMENTS_MAX", "100"))
-        except (ValueError, TypeError):
+        except ValueError:
             max_comments = 100
-
-    if max_comments < 0:
-        max_comments = 100
-    if max_comments == 0:
-        return f"No comments found in {app_name} {file_id}"
+        if max_comments < 1:
+            max_comments = 100
 
     comments: list = []
     page_token: str | None = None

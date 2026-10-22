@@ -2058,7 +2058,7 @@ async def get_gmail_messages_content_batch(
     Supports up to 25 messages per batch to prevent SSL connection exhaustion.
 
     Args:
-        message_ids (List[str]): List of Gmail message IDs to retrieve (max 25 per batch).
+        message_ids (List[str]): List of Gmail message IDs to retrieve; fetched in batches of 25.
         user_google_email (str): The user's Google email address. Required.
         format (Literal["full", "metadata"]): Message format. "full" includes body, "metadata" only headers.
         body_format (Literal["text", "html", "raw"]): Body output format (only applies when format='full').
@@ -2074,7 +2074,7 @@ async def get_gmail_messages_content_batch(
     )
 
     if not message_ids:
-        raise Exception("No message IDs provided")
+        raise UserInputError("No message IDs provided")
     _validate_message_format_options(format, body_format)
 
     output_messages = []
@@ -3285,15 +3285,21 @@ async def draft_gmail_message(
             description="Whether to append the Gmail signature from Settings > Signature when available. Defaults to true.",
         ),
     ] = True,
+    direction: Annotated[
+        TextDirection, Field(description=DIRECTION_DESCRIPTION)
+    ] = "auto",
     quote_original: Annotated[
         bool,
         Field(
             description="Whether to include the original message as a quoted reply. Only has an effect when thread_id is provided. Defaults to false.",
         ),
     ] = False,
-    direction: Annotated[
-        TextDirection, Field(description=DIRECTION_DESCRIPTION)
-    ] = "auto",
+    reply_all: Annotated[
+        bool,
+        Field(
+            description="Whether to derive reply-all recipients from the thread: To = the sender being replied to, Cc = the other participants, excluding the authenticated account and from_email. Requires thread_id. Explicit to/cc win; when cc is omitted the sender being replied to is added to the derived Cc if they are not already in To. Defaults to false.",
+        ),
+    ] = False,
 ) -> str:
     """
     Creates a draft email in the user's Gmail account. Supports new, reply, and forward
@@ -3357,6 +3363,11 @@ async def draft_gmail_message(
         quote_original (bool): Whether to include the original message as a quoted reply.
             Only has an effect when thread_id is provided. When enabled, fetches the
             original message and appends it below the signature. Defaults to False.
+        reply_all (bool): Whether to derive reply-all recipients from the thread: To = the
+            sender being replied to, Cc = the other participants, excluding the authenticated
+            account and from_email. Requires thread_id. Explicit to/cc win over the derived
+            values; when cc is omitted, the sender being replied to is added to the derived Cc
+            unless they are already in To.
 
     Returns:
         str: Confirmation message with the created draft's ID.
@@ -3458,6 +3469,12 @@ async def draft_gmail_message(
             "forwarding via 'forward_message_id'."
         )
 
+    if reply_all and not thread_id:
+        raise UserInputError(
+            "'reply_all' requires a thread_id: the recipients are derived from "
+            "the message being replied to."
+        )
+
     logger.info(
         f"[draft_gmail_message] Invoked. Email: '{user_google_email}', subject_len={len(subject) if subject else 0}"
     )
@@ -3487,6 +3504,7 @@ async def draft_gmail_message(
     reply_context = None
     if thread_id and (
         quote_original
+        or reply_all
         or not (subject or "").strip()
         or not in_reply_to
         or not references
@@ -3508,7 +3526,11 @@ async def draft_gmail_message(
             thread_message_ids, in_reply_to, references, target_reply
         )
 
-    if thread_id and not to and target_reply:
+    if reply_all and target_reply:
+        to, cc = _derive_reply_all_recipients(
+            target_reply, {user_google_email, sender_email}, to, cc
+        )
+    elif thread_id and not to and target_reply:
         to = target_reply.get("reply_to") or target_reply.get("from") or to
     if thread_id and not (subject or "").strip():
         subject = _inherit_reply_subject(thread_id, target_reply)
@@ -4110,10 +4132,10 @@ async def manage_gmail_label(
     )
 
     if action == "create" and not name:
-        raise Exception("Label name is required for create action.")
+        raise UserInputError("Label name is required for create action.")
 
     if action in ["update", "delete"] and not label_id:
-        raise Exception("Label ID is required for update and delete actions.")
+        raise UserInputError("Label ID is required for update and delete actions.")
 
     color = None
     if action in ["create", "update"]:
@@ -4457,7 +4479,7 @@ async def modify_gmail_message_labels(
     )
 
     if not add_label_ids and not remove_label_ids:
-        raise Exception(
+        raise UserInputError(
             "At least one of add_label_ids or remove_label_ids must be provided."
         )
 
@@ -4609,44 +4631,47 @@ async def batch_modify_gmail_message_labels(
     thread_ids: _OptionalLabelIdList = None,
 ) -> str:
     """
-    Adds or removes labels from multiple Gmail messages in a single batch request,
-    or from whole conversations via thread_ids.
+    Adds or removes labels on many Gmail messages, or on every message of whole
+    conversations via thread_ids.
 
-    message_ids takes MESSAGE ids. Gmail's batch endpoint returns no
-    per-message result and silently ignores ids it does not recognise, so by
-    default this reads the messages back afterwards and reports which ids
-    actually changed.
+    message_ids are sent in one users.messages.batchModify call (Gmail accepts
+    up to 1000 ids per call). That endpoint returns no per-message result and
+    silently ignores ids it does not recognise, so by default the messages are
+    read back afterwards to report which ids actually changed.
 
-    thread_ids applies the change to EVERY message of each conversation
-    (users.threads.modify), e.g. archive a conversation with
-    remove_label_ids=["INBOX"] or mark it read with remove_label_ids=["UNREAD"].
-    Each thread reports its own outcome. message_ids and thread_ids can be
-    combined; at least one is required.
+    thread_ids are modified one at a time with users.threads.modify, e.g.
+    archive a conversation with remove_label_ids=["INBOX"] or mark it read with
+    remove_label_ids=["UNREAD"]. Each thread reports its own outcome.
+    message_ids and thread_ids can be combined; at least one is required, as is
+    at least one of add_label_ids or remove_label_ids.
 
     Args:
         user_google_email (str): The user's Google email address. Required.
-        message_ids (Optional[List[str]]): A list of message IDs to modify.
-        add_label_ids (Optional[List[str]]): List of label IDs to add to the messages.
-        remove_label_ids (Optional[List[str]]): List of label IDs to remove from the messages.
-        verify (bool): Read the messages back and report per-id outcomes. Costs
-            one extra (batched) read per id. Set False for very large sweeps
-            where that cost matters and an unverified result is acceptable.
-            Not needed for thread_ids, which always report per thread.
+        message_ids (Optional[List[str]]): Message IDs to modify.
+        add_label_ids (Optional[List[str]]): Label IDs to add.
+        remove_label_ids (Optional[List[str]]): Label IDs to remove.
+        verify (bool): Read message_ids back and report per-id outcomes, at the
+            cost of one extra read per id (batched 25 at a time). Set False for
+            very large sweeps where an unverified result is acceptable. Has no
+            effect on thread_ids, which always report per thread.
         thread_ids (Optional[List[str]]): Thread (conversation) IDs to modify.
 
     Returns:
-        str: Which label changes were applied, and which ids did not resolve.
+        str: Per-id outcomes for message_ids (applied, unchanged, not found, or
+            unverified) and per-thread outcomes for thread_ids.
     """
     logger.info(
         f"[batch_modify_gmail_message_labels] Invoked. Email: '{user_google_email}', Message IDs: '{message_ids}', Thread IDs: '{thread_ids}'"
     )
 
     if not add_label_ids and not remove_label_ids:
-        raise Exception(
+        raise UserInputError(
             "At least one of add_label_ids or remove_label_ids must be provided."
         )
     if not message_ids and not thread_ids:
-        raise Exception("At least one of message_ids or thread_ids must be provided.")
+        raise UserInputError(
+            "At least one of message_ids or thread_ids must be provided."
+        )
 
     actions = []
     if add_label_ids:

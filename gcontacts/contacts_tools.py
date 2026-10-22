@@ -318,7 +318,7 @@ def _build_person_body(
         emails: List of EmailInput items {address, value?, type?}.
         organizations: List of OrganizationInput items {name?, title?, department?, jobDescription?, type?}.
         notes: Additional notes/biography.
-        address: Street address.
+        address: Street address, replacing any existing addresses. "" clears them.
         birthday: Birthday as 'YYYY-MM-DD', 'MM-DD' (no year), or 'clear'/'' to remove.
         email: [DEPRECATED] Single email address. Use emails instead.
         phone: [DEPRECATED] Single phone number. Use phones instead.
@@ -515,8 +515,9 @@ def _build_person_body(
         else:
             body["biographies"] = []
 
-    if address:
-        body["addresses"] = [{"formattedValue": address}]
+    # Same convention as notes: None → no change, "" → explicit clear.
+    if address is not None:
+        body["addresses"] = [{"formattedValue": address}] if address else []
 
     if birthday is not None:
         if birthday.strip().lower() in ("clear", ""):
@@ -818,7 +819,7 @@ async def manage_contact(
         relations (Optional[List[Dict]]): List of relation dicts {person, type?}.
             Supported types: spouse, child, parent, friend, manager, assistant, etc.
         notes (Optional[str]): Additional notes (for create/update).
-        address (Optional[str]): Street address (for create/update).
+        address (Optional[str]): Street address, replacing any existing addresses. "" clears them (for create/update).
         birthday (Optional[str]): Birthday as 'YYYY-MM-DD', 'MM-DD' (no year), or 'clear'/'' to remove.
         phones_mode (str): How to update phones on "update": "merge" (default), "replace", or "remove".
             merge = read-modify-write with dedup by canonicalForm/normalized value.
@@ -1267,12 +1268,13 @@ async def manage_contacts_batch(
         user_google_email (str): The user's Google email address. Required.
         action (str): The action to perform: "create", "update", or "delete".
         contacts (Optional[List[Dict]]): List of contact dicts for "create" action.
-            Each dict may contain: given_name, family_name, phones, emails, organizations,
-            notes, address. Deprecated: phone, email, organization, job_title.
+            Each dict may contain: given_name, family_name, phones, emails,
+            organizations, nicknames, urls, user_defined, relations, notes, address,
+            birthday. Deprecated: phone, email, organization, job_title.
         updates (Optional[List[Dict]]): List of update dicts for "update" action.
             Each dict must contain contact_id and may contain the same fields as contacts.
         contact_ids (Optional[List[str]]): List of contact IDs for "delete" action.
-        field (str): For "update" action — the single People API field to update across
+        field (str): For "update" action, the single People API field to update across
             all contacts in this batch. Required. Must be one of: names, phoneNumbers,
             emailAddresses, organizations, nicknames, urls, userDefined, relations,
             biographies, addresses, birthdays. Using a single field per batch call prevents

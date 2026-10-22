@@ -870,7 +870,9 @@ async def get_page_thumbnail(
             Defaults to False.
 
     Returns:
-        str: URL to the generated thumbnail image.
+        str: URL to the generated thumbnail image. With inline=True the same
+        text comes back as a ToolResult that also carries the PNG; the
+        annotation stays str so the advertised output schema is unchanged.
     """
     logger.info(
         f"[get_page_thumbnail] Invoked. Email: '{user_google_email}', Presentation: '{presentation_id}', Page: '{page_object_id}', Size: '{thumbnail_size}'"

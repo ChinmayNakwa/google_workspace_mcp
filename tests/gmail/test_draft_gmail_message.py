@@ -1986,6 +1986,59 @@ async def test_send_gmail_message_requires_to_when_forwarding():
 
 
 @pytest.mark.asyncio
+async def test_draft_gmail_message_reply_all_derives_recipients():
+    mock_service = _mock_gmail_service()
+    mock_service.users().drafts().create().execute.return_value = {"id": "draft_reply"}
+    mock_service.users().threads().get().execute.return_value = {
+        "messages": [
+            _thread_message(
+                "<msg1@example.com>",
+                from_value="Alice Example <alice@example.com>",
+                to_value="user@example.com, bob@example.com",
+                cc_value="carol@example.com",
+            )
+        ]
+    }
+
+    await _unwrap(draft_gmail_message)(
+        service=mock_service,
+        user_google_email="user@example.com",
+        subject="Re: Meeting tomorrow",
+        body="Thanks all.",
+        thread_id="thread123",
+        reply_all=True,
+        include_signature=False,
+    )
+
+    create_kwargs = (
+        mock_service.users.return_value.drafts.return_value.create.call_args.kwargs
+    )
+    parsed = _parse_raw_message(create_kwargs["body"]["message"]["raw"])
+    assert parsed["To"] == "alice@example.com"
+    # The authenticated account is dropped; everyone else on the message is kept.
+    assert parsed["Cc"] == "bob@example.com, carol@example.com"
+
+
+@pytest.mark.asyncio
+async def test_draft_gmail_message_reply_all_requires_a_thread_id():
+    mock_service = _mock_gmail_service()
+
+    with pytest.raises(UserInputError, match="'reply_all' requires a thread_id"):
+        await _unwrap(draft_gmail_message)(
+            service=mock_service,
+            user_google_email="user@example.com",
+            to="recipient@example.com",
+            subject="Hello",
+            body="Hi there!",
+            reply_all=True,
+            include_signature=False,
+        )
+
+    mock_service.users.return_value.drafts.return_value.create.assert_not_called()
+    mock_service.users.return_value.threads.return_value.get.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_draft_gmail_message_forward_creates_draft_instead_of_sending():
     mock_service = _mock_gmail_service()
     mock_service.users().messages().get().execute.return_value = {

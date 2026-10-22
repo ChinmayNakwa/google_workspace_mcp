@@ -7,7 +7,6 @@ This module provides MCP tools for interacting with Google Docs API and managing
 import logging
 import asyncio
 import io
-import inspect
 import re
 from typing import List, Any, Literal, Optional, Union
 from urllib.parse import parse_qs, urlsplit
@@ -83,7 +82,11 @@ from gdocs.managers import (
     ValidationManager,
     BatchOperationManager,
 )
-from gdrive.drive_helpers import flag_incomplete_search, move_new_file_to_folder
+from gdrive.drive_helpers import (
+    escape_drive_query_value,
+    flag_incomplete_search,
+    move_new_file_to_folder,
+)
 import json
 
 logger = logging.getLogger(__name__)
@@ -198,7 +201,7 @@ async def search_docs(
     logger.info(f"[search_docs] Email={user_google_email}, query_len={len(query)}")
     logger.debug(f"[search_docs] Query='{query}'")
 
-    escaped_query = query.replace("'", "\\'")
+    escaped_query = escape_drive_query_value(query)
 
     response = await asyncio.to_thread(
         service.files()
@@ -703,7 +706,7 @@ async def modify_doc_text(
         small_caps,
     ]
     if text is None and not any(p is not None for p in formatting_params):
-        return "Error: Must provide either 'text' to insert/replace, or formatting parameters (bold, italic, underline, strikethrough, font_size, font_family, text_color, background_color, link_url)."
+        return "Error: Must provide either 'text' to insert/replace, or formatting parameters (bold, italic, underline, strikethrough, font_size, font_family, font_weight, text_color, background_color, link_url, clear_link, baseline_offset, small_caps)."
 
     # Validate text formatting params if provided
     if any(p is not None for p in formatting_params):
@@ -1937,43 +1940,6 @@ def _build_segment_inspection_entries(
 
 
 @server.tool(
-    title="Debug Docs Runtime Info",
-    annotations=ToolAnnotations(
-        readOnlyHint=True,
-        destructiveHint=False,
-        idempotentHint=True,
-        openWorldHint=True,
-    ),
-)
-@handle_http_errors("debug_docs_runtime_info", is_read_only=True, service_type="docs")
-@require_google_service("docs", "docs_read")
-async def debug_docs_runtime_info(
-    service: Any,
-    user_google_email: str,
-) -> str:
-    """
-    Return runtime/source information for diagnosing stale MCP server instances.
-
-    This is a temporary diagnostic tool intended to verify which code checkout
-    the running MCP server has loaded.
-    """
-    import gdocs.managers.header_footer_manager as header_footer_manager_module
-
-    return json.dumps(
-        {
-            "runtime_canary": HEADER_FOOTER_RUNTIME_CANARY,
-            "docs_tools_file": inspect.getsourcefile(
-                inspect.getmodule(debug_docs_runtime_info)
-            ),
-            "header_footer_manager_file": inspect.getsourcefile(
-                header_footer_manager_module
-            ),
-        },
-        indent=2,
-    )
-
-
-@server.tool(
     title="Create Table with Data",
     annotations=ToolAnnotations(
         readOnlyHint=False,
@@ -2117,7 +2083,7 @@ async def debug_table_structure(
     - You get "table not found" errors
     - Data appears concatenated in first cell
     - Need to understand existing table structure
-    - Planning to use populate_existing_table
+    - Planning to fill existing cells with modify_doc_text at their insertion_index
 
     WHAT THIS SHOWS YOU:
     - Exact table dimensions (rows × columns)
@@ -2511,61 +2477,40 @@ async def update_paragraph_style(
         if list_nesting_level < 0 or list_nesting_level > 8:
             return "Error: list_nesting_level must be between 0 and 8"
 
-    # Validate named_style_type
-    if named_style_type is not None and heading_level is not None:
-        return "Error: heading_level and named_style_type are mutually exclusive; provide only one"
+    if bullet_preset is not None and list_type_value in (None, "NONE"):
+        return "Error: bullet_preset requires list_type 'UNORDERED', 'ORDERED', or 'CHECKBOX'"
 
-    paragraph_style_params = [
-        heading_level,
-        alignment,
-        line_spacing,
-        indent_first_line,
-        indent_start,
-        indent_end,
-        space_above,
-        space_below,
-        named_style_type,
-        direction,
-        keep_lines_together,
-        keep_with_next,
-        avoid_widow_and_orphan,
-        page_break_before,
-        spacing_mode,
-        shading_color,
-        border_edges,
-        border_color,
-        border_width,
-        border_padding,
-        border_dash,
-    ]
-
-    validator = ValidationManager()
-    is_valid, error_msg = validator.validate_paragraph_style_params(
-        heading_level=heading_level,
-        alignment=alignment,
-        line_spacing=line_spacing,
-        indent_first_line=indent_first_line,
-        indent_start=indent_start,
-        indent_end=indent_end,
-        space_above=space_above,
-        space_below=space_below,
-        named_style_type=named_style_type,
-        direction=direction,
-        keep_lines_together=keep_lines_together,
-        keep_with_next=keep_with_next,
-        avoid_widow_and_orphan=avoid_widow_and_orphan,
-        page_break_before=page_break_before,
-        spacing_mode=spacing_mode,
-        shading_color=shading_color,
-        border_edges=border_edges,
-        border_color=border_color,
-        border_width=border_width,
-        border_padding=border_padding,
-        border_dash=border_dash,
-    )
-    has_paragraph_style = any(param is not None for param in paragraph_style_params)
-    if not is_valid and (has_paragraph_style or list_type_value is None):
-        return f"Error: {error_msg}"
+    style_params = {
+        "heading_level": heading_level,
+        "alignment": alignment,
+        "line_spacing": line_spacing,
+        "indent_first_line": indent_first_line,
+        "indent_start": indent_start,
+        "indent_end": indent_end,
+        "space_above": space_above,
+        "space_below": space_below,
+        "named_style_type": named_style_type,
+        "direction": direction,
+        "keep_lines_together": keep_lines_together,
+        "keep_with_next": keep_with_next,
+        "avoid_widow_and_orphan": avoid_widow_and_orphan,
+        "page_break_before": page_break_before,
+        "spacing_mode": spacing_mode,
+        "shading_color": shading_color,
+        "border_edges": border_edges,
+        "border_color": border_color,
+        "border_width": border_width,
+        "border_padding": border_padding,
+        "border_dash": border_dash,
+    }
+    # A list-only call has no style params, so skip the validator's
+    # "at least one style param" check rather than discarding its errors.
+    if list_type_value is None or any(v is not None for v in style_params.values()):
+        is_valid, error_msg = ValidationManager().validate_paragraph_style_params(
+            **style_params
+        )
+        if not is_valid:
+            return f"Error: {error_msg}"
 
     # Create batch update requests
     requests = []
@@ -2653,28 +2598,8 @@ async def update_paragraph_style(
         )
     detail_labels = [
         name
-        for name, value in [
-            ("alignment", alignment),
-            ("line_spacing", line_spacing),
-            ("indent_first_line", indent_first_line),
-            ("indent_start", indent_start),
-            ("indent_end", indent_end),
-            ("space_above", space_above),
-            ("space_below", space_below),
-            ("direction", direction),
-            ("keep_lines_together", keep_lines_together),
-            ("keep_with_next", keep_with_next),
-            ("avoid_widow_and_orphan", avoid_widow_and_orphan),
-            ("page_break_before", page_break_before),
-            ("spacing_mode", spacing_mode),
-            ("shading_color", shading_color),
-            ("border_edges", border_edges),
-            ("border_color", border_color),
-            ("border_width", border_width),
-            ("border_padding", border_padding),
-            ("border_dash", border_dash),
-        ]
-        if value is not None
+        for name, value in style_params.items()
+        if value is not None and name not in ("heading_level", "named_style_type")
     ]
     if detail_labels:
         summary_parts.append(", ".join(detail_labels))

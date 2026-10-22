@@ -186,7 +186,7 @@ def _validate_auto_decline_mode(mode: Optional[str], function_name: str) -> str:
     if mode is None:
         return "declineAllConflictingInvitations"
     if mode not in _VALID_AUTO_DECLINE_MODES:
-        raise ValueError(
+        raise UserInputError(
             f"[{function_name}] Invalid auto_decline_mode '{mode}'. "
             f"Must be one of: {', '.join(sorted(_VALID_AUTO_DECLINE_MODES))}"
         )
@@ -308,7 +308,7 @@ def _build_time_boundary(time_value: str, timezone: Optional[str]) -> Dict[str, 
     try:
         parsed = datetime.datetime.fromisoformat(re.sub(r"[zZ]$", "+00:00", time_value))
     except ValueError as exc:
-        raise ValueError(
+        raise UserInputError(
             f"Invalid RFC3339 timestamp {time_value!r}. Use a value such as "
             "'2026-09-17T11:35:00' or '2026-09-17T11:35:00-07:00'."
         ) from exc
@@ -324,7 +324,7 @@ def _build_time_boundary(time_value: str, timezone: Optional[str]) -> Dict[str, 
     try:
         zone = ZoneInfo(timezone)
     except (ZoneInfoNotFoundError, ValueError) as exc:
-        raise ValueError(
+        raise UserInputError(
             f"Unrecognized IANA timezone {timezone!r}. Use a zone name such as "
             "'America/New_York' or 'Europe/Amsterdam'."
         ) from exc
@@ -492,7 +492,7 @@ async def get_events(
         # to "now", which would change the query between pages.
         formatted_time_min = _correct_time_format_for_api(time_min, "time_min", None)
         if page_token and formatted_time_min is None and single_events:
-            raise ValueError(
+            raise UserInputError(
                 "[get_events] page_token requires time_min. Pass the Pagination "
                 "time_min from the previous response to preserve the original range."
             )
@@ -716,7 +716,7 @@ def _resolve_conference_data(
         [conference_provider, conference_uri, conference_passcode, conference_id]
     )
     if conference_data is not None and helper_used:
-        raise ValueError(
+        raise UserInputError(
             "Provide either conference_data (raw payload) or the "
             "conference_provider/conference_uri helper params, not both."
         )
@@ -726,7 +726,7 @@ def _resolve_conference_data(
         provider = (conference_provider or "").strip()
         uri = (conference_uri or "").strip()
         if not (provider and uri):
-            raise ValueError(
+            raise UserInputError(
                 "conference_provider and conference_uri are both required to "
                 "attach a third-party conference."
             )
@@ -735,7 +735,7 @@ def _resolve_conference_data(
         )
 
     if resolved is not None and add_google_meet:
-        raise ValueError(
+        raise UserInputError(
             "Cannot attach a third-party conference and add_google_meet on the "
             "same event; choose one."
         )
@@ -991,10 +991,6 @@ async def _create_event_impl(
     return confirmation_message
 
 
-class AttendeeValidationError(ValueError, UserInputError):
-    """Invalid attendee input, preserving ValueError compatibility for callers."""
-
-
 def _normalize_attendees(
     attendees: Optional[List[Union[str, Dict[str, Any]]]],
 ) -> Optional[List[Dict[str, Any]]]:
@@ -1009,7 +1005,7 @@ def _normalize_attendees(
     Returns list of attendee dicts with at minimum 'email' key.
 
     Raises:
-        AttendeeValidationError: If an attendee is neither an email string nor a
+        UserInputError: If an attendee is neither an email string nor a
             dict with an 'email' key, so it is never silently left off the event.
     """
     if attendees is None:
@@ -1022,7 +1018,7 @@ def _normalize_attendees(
         elif isinstance(att, dict) and "email" in att:
             normalized.append(att)
         else:
-            raise AttendeeValidationError(
+            raise UserInputError(
                 "Each attendee must be an email string or an object with an "
                 f"'email' key; got {type(att).__name__}"
             )
@@ -1351,7 +1347,7 @@ async def _rsvp_event_impl(
     """Internal implementation for responding to a calendar event invitation."""
     valid_responses = {"accepted", "declined", "tentative", "needsAction"}
     if response not in valid_responses:
-        raise ValueError(
+        raise UserInputError(
             f"Invalid response '{response}'. Must be one of: {sorted(valid_responses)}"
         )
 
@@ -1512,7 +1508,7 @@ async def manage_event(
     if send_updates is not None:
         valid_send_updates = {"all", "externalOnly", "none"}
         if send_updates not in valid_send_updates:
-            raise ValueError(
+            raise UserInputError(
                 f"Invalid send_updates '{send_updates}'. Must be one of: {sorted(valid_send_updates)}"
             )
 
@@ -1531,7 +1527,7 @@ async def manage_event(
 
     if action_lower == "create":
         if not summary or not start_time or not end_time:
-            raise ValueError(
+            raise UserInputError(
                 "summary, start_time, and end_time are required for create action"
             )
         return await _create_event_impl(
@@ -1564,7 +1560,7 @@ async def manage_event(
         )
     elif action_lower == "update":
         if not event_id:
-            raise ValueError("event_id is required for update action")
+            raise UserInputError("event_id is required for update action")
         return await _modify_event_impl(
             service=service,
             user_google_email=user_google_email,
@@ -1595,7 +1591,7 @@ async def manage_event(
         )
     elif action_lower == "delete":
         if not event_id:
-            raise ValueError("event_id is required for delete action")
+            raise UserInputError("event_id is required for delete action")
         return await _delete_event_impl(
             service=service,
             user_google_email=user_google_email,
@@ -1605,9 +1601,9 @@ async def manage_event(
         )
     elif action_lower == "rsvp":
         if not event_id:
-            raise ValueError("event_id is required for rsvp action")
+            raise UserInputError("event_id is required for rsvp action")
         if not response:
-            raise ValueError("response is required for rsvp action")
+            raise UserInputError("response is required for rsvp action")
         return await _rsvp_event_impl(
             service=service,
             user_google_email=user_google_email,
@@ -1618,7 +1614,7 @@ async def manage_event(
             send_updates=send_updates or "all",
         )
     else:
-        raise ValueError(
+        raise UserInputError(
             f"Invalid action '{action_lower}'. Must be 'create', 'update', 'delete', or 'rsvp'."
         )
 
@@ -1628,28 +1624,25 @@ async def manage_event(
 # ---------------------------------------------------------------------------
 
 
-def _ooo_time_entry(
-    time_str: str, is_end: bool = False, timezone: Optional[str] = None
+def _status_event_time_entry(
+    time_str: str, timezone: Optional[str], event_label: str
 ) -> Dict[str, str]:
-    """Build a start/end dict for an OOO event.
+    """Build a start/end dict for an Out of Office or Focus Time event.
 
-    Google Calendar API requires dateTime (not date) for outOfOffice events.
-    If a date-only string (YYYY-MM-DD) is given, convert it:
-      - start → YYYY-MM-DDT00:00:00
-      - end   → (next day)T00:00:00  (so a single date covers the full day)
+    The Calendar API requires dateTime (not date) for these event types, so a
+    date-only string (YYYY-MM-DD) becomes midnight of that day. Ends are
+    exclusive, so an end of 2026-04-06 stops at the start of that day.
     """
     if "T" not in time_str:
-        # End date is already expected to be exclusive by the caller, so both
-        # date-only forms convert to midnight on the provided day.
         time_str = f"{time_str}T00:00:00"
-        logger.info(f"[ooo_time_entry] Converted date-only to dateTime: {time_str}")
+        logger.info(f"[{event_label}] Converted date-only to dateTime: {time_str}")
 
     has_explicit_offset = time_str.endswith("Z") or bool(
         re.search(r"[+-]\d{2}:\d{2}$", time_str)
     )
     if not has_explicit_offset and not timezone:
-        raise ValueError(
-            "Out of Office events require either a timezone parameter or a "
+        raise UserInputError(
+            f"{event_label} events require either a timezone parameter or a "
             "start/end timestamp with an explicit UTC offset."
         )
 
@@ -1684,8 +1677,8 @@ async def _create_ooo_event_impl(
     event_body: Dict[str, Any] = {
         "eventType": "outOfOffice",
         "summary": effective_summary,
-        "start": _ooo_time_entry(start_time, is_end=False, timezone=timezone),
-        "end": _ooo_time_entry(end_time, is_end=True, timezone=timezone),
+        "start": _status_event_time_entry(start_time, timezone, "Out of Office"),
+        "end": _status_event_time_entry(end_time, timezone, "Out of Office"),
         "outOfOfficeProperties": {
             "autoDeclineMode": effective_decline_mode,
             "declineMessage": decline_message or "",
@@ -1745,7 +1738,7 @@ async def _list_ooo_events_impl(
 
     formatted_time_min = _correct_time_format_for_api(time_min, "time_min", timezone)
     if page_token and formatted_time_min is None:
-        raise ValueError(
+        raise UserInputError(
             "[list_ooo_events] page_token requires time_min. Pass the Pagination "
             "time_min from the previous response to preserve the original range."
         )
@@ -1855,7 +1848,7 @@ async def _update_ooo_event_impl(
     )
 
     if existing_event.get("eventType") != "outOfOffice":
-        raise ValueError(
+        raise UserInputError(
             f"Event '{event_id}' is not an Out of Office event (type: '{existing_event.get('eventType', 'default')}'). "
             f"Use manage_event to update regular events."
         )
@@ -1865,11 +1858,13 @@ async def _update_ooo_event_impl(
     if summary is not None:
         patch_body["summary"] = summary
     if start_time is not None:
-        patch_body["start"] = _ooo_time_entry(
-            start_time, is_end=False, timezone=timezone
+        patch_body["start"] = _status_event_time_entry(
+            start_time, timezone, "Out of Office"
         )
     if end_time is not None:
-        patch_body["end"] = _ooo_time_entry(end_time, is_end=True, timezone=timezone)
+        patch_body["end"] = _status_event_time_entry(
+            end_time, timezone, "Out of Office"
+        )
     if recurrence is not None:
         patch_body["recurrence"] = recurrence
 
@@ -1939,7 +1934,7 @@ async def _delete_ooo_event_impl(
             )
         )
         if existing_event.get("eventType") != "outOfOffice":
-            raise ValueError(
+            raise UserInputError(
                 f"Event '{event_id}' is not an Out of Office event (type: '{existing_event.get('eventType', 'default')}'). "
                 f"Use manage_event to delete regular events."
             )
@@ -2020,7 +2015,9 @@ async def manage_out_of_office(
     action_lower = action.lower().strip()
     if action_lower == "create":
         if not start_time or not end_time:
-            raise ValueError("start_time and end_time are required for create action")
+            raise UserInputError(
+                "start_time and end_time are required for create action"
+            )
         return await _create_ooo_event_impl(
             service=service,
             user_google_email=user_google_email,
@@ -2046,7 +2043,7 @@ async def manage_out_of_office(
         )
     elif action_lower == "update":
         if not event_id:
-            raise ValueError("event_id is required for update action")
+            raise UserInputError("event_id is required for update action")
         return await _update_ooo_event_impl(
             service=service,
             user_google_email=user_google_email,
@@ -2062,7 +2059,7 @@ async def manage_out_of_office(
         )
     elif action_lower == "delete":
         if not event_id:
-            raise ValueError("event_id is required for delete action")
+            raise UserInputError("event_id is required for delete action")
         return await _delete_ooo_event_impl(
             service=service,
             user_google_email=user_google_email,
@@ -2070,7 +2067,7 @@ async def manage_out_of_office(
             calendar_id=calendar_id,
         )
     else:
-        raise ValueError(
+        raise UserInputError(
             f"Invalid action '{action_lower}'. Must be 'create', 'list', 'update', or 'delete'."
         )
 
@@ -2080,37 +2077,6 @@ async def manage_out_of_office(
 # ---------------------------------------------------------------------------
 
 
-def _focus_time_time_entry(
-    time_str: str, is_end: bool = False, timezone: Optional[str] = None
-) -> Dict[str, str]:
-    """Build a start/end dict for a Focus Time event.
-
-    Google Calendar API requires dateTime (not date) for focusTime events.
-    If a date-only string (YYYY-MM-DD) is given, convert it:
-      - start → YYYY-MM-DDT00:00:00
-      - end   → (next day)T00:00:00  (so a single date covers the full day)
-    """
-    if "T" not in time_str:
-        time_str = f"{time_str}T00:00:00"
-        logger.info(
-            f"[focus_time_time_entry] Converted date-only to dateTime: {time_str}"
-        )
-
-    has_explicit_offset = time_str.endswith("Z") or bool(
-        re.search(r"[+-]\d{2}:\d{2}$", time_str)
-    )
-    if not has_explicit_offset and not timezone:
-        raise ValueError(
-            "Focus Time events require either a timezone parameter or a "
-            "start/end timestamp with an explicit UTC offset."
-        )
-
-    entry: Dict[str, str] = {"dateTime": time_str}
-    if timezone:
-        entry["timeZone"] = timezone
-    return entry
-
-
 def _validate_chat_status(
     chat_status: Optional[str], function_name: str
 ) -> Optional[str]:
@@ -2118,7 +2084,7 @@ def _validate_chat_status(
     if chat_status is None:
         return None
     if chat_status not in _VALID_FOCUS_TIME_CHAT_STATUSES:
-        raise ValueError(
+        raise UserInputError(
             f"[{function_name}] Invalid chat_status '{chat_status}'. "
             f"Must be one of: {', '.join(sorted(_VALID_FOCUS_TIME_CHAT_STATUSES))}"
         )
@@ -2162,8 +2128,8 @@ async def _create_focus_time_event_impl(
     event_body: Dict[str, Any] = {
         "eventType": "focusTime",
         "summary": effective_summary,
-        "start": _focus_time_time_entry(start_time, is_end=False, timezone=timezone),
-        "end": _focus_time_time_entry(end_time, is_end=True, timezone=timezone),
+        "start": _status_event_time_entry(start_time, timezone, "Focus Time"),
+        "end": _status_event_time_entry(end_time, timezone, "Focus Time"),
         "focusTimeProperties": focus_time_props,
         "transparency": "opaque",
     }
@@ -2223,7 +2189,7 @@ async def _list_focus_time_events_impl(
 
     formatted_time_min = _correct_time_format_for_api(time_min, "time_min", timezone)
     if page_token and formatted_time_min is None:
-        raise ValueError(
+        raise UserInputError(
             "[list_focus_time_events] page_token requires time_min. Pass the Pagination "
             "time_min from the previous response to preserve the original range."
         )
@@ -2338,7 +2304,7 @@ async def _update_focus_time_event_impl(
     )
 
     if existing_event.get("eventType") != "focusTime":
-        raise ValueError(
+        raise UserInputError(
             f"Event '{event_id}' is not a Focus Time event (type: '{existing_event.get('eventType', 'default')}'). "
             f"Use manage_event to update regular events."
         )
@@ -2350,13 +2316,11 @@ async def _update_focus_time_event_impl(
     if description is not None:
         patch_body["description"] = description
     if start_time is not None:
-        patch_body["start"] = _focus_time_time_entry(
-            start_time, is_end=False, timezone=timezone
+        patch_body["start"] = _status_event_time_entry(
+            start_time, timezone, "Focus Time"
         )
     if end_time is not None:
-        patch_body["end"] = _focus_time_time_entry(
-            end_time, is_end=True, timezone=timezone
-        )
+        patch_body["end"] = _status_event_time_entry(end_time, timezone, "Focus Time")
     if recurrence is not None:
         patch_body["recurrence"] = recurrence
 
@@ -2436,7 +2400,7 @@ async def _delete_focus_time_event_impl(
             )
         )
         if existing_event.get("eventType") != "focusTime":
-            raise ValueError(
+            raise UserInputError(
                 f"Event '{event_id}' is not a Focus Time event (type: '{existing_event.get('eventType', 'default')}'). "
                 f"Use manage_event to delete regular events."
             )
@@ -2522,7 +2486,9 @@ async def manage_focus_time(
     action_lower = action.lower().strip()
     if action_lower == "create":
         if not start_time or not end_time:
-            raise ValueError("start_time and end_time are required for create action")
+            raise UserInputError(
+                "start_time and end_time are required for create action"
+            )
         return await _create_focus_time_event_impl(
             service=service,
             user_google_email=user_google_email,
@@ -2550,7 +2516,7 @@ async def manage_focus_time(
         )
     elif action_lower == "update":
         if not event_id:
-            raise ValueError("event_id is required for update action")
+            raise UserInputError("event_id is required for update action")
         return await _update_focus_time_event_impl(
             service=service,
             user_google_email=user_google_email,
@@ -2568,7 +2534,7 @@ async def manage_focus_time(
         )
     elif action_lower == "delete":
         if not event_id:
-            raise ValueError("event_id is required for delete action")
+            raise UserInputError("event_id is required for delete action")
         return await _delete_focus_time_event_impl(
             service=service,
             user_google_email=user_google_email,
@@ -2576,7 +2542,7 @@ async def manage_focus_time(
             calendar_id=calendar_id,
         )
     else:
-        raise ValueError(
+        raise UserInputError(
             f"Invalid action '{action_lower}'. Must be 'create', 'list', 'update', or 'delete'."
         )
 
