@@ -13,13 +13,15 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 from core.utils import UserInputError
+from gcalendar.calendar_helpers import (
+    _status_event_time_entry,
+    _validate_auto_decline_mode,
+)
 from gcalendar.calendar_tools import (
     _create_ooo_event_impl,
     _list_ooo_events_impl,
     _update_ooo_event_impl,
     _delete_ooo_event_impl,
-    _validate_auto_decline_mode,
-    _status_event_time_entry,
 )
 
 
@@ -58,14 +60,14 @@ class TestValidateAutoDeclineMode:
 
 
 # ---------------------------------------------------------------------------
-# _status_event_time_entry - date-only to dateTime conversion
+# _status_event_time_entry: date-only to dateTime conversion
 # ---------------------------------------------------------------------------
 
 
-class TestOooTimeEntry:
+class TestStatusEventTimeEntry:
     def test_date_only_start_converts_to_midnight_when_timezone_provided(self):
         result = _status_event_time_entry(
-            "2026-04-05", "America/New_York", "Out of Office"
+            "2026-04-05", "Out of Office", timezone="America/New_York"
         )
         assert result == {
             "dateTime": "2026-04-05T00:00:00",
@@ -74,7 +76,7 @@ class TestOooTimeEntry:
 
     def test_date_only_end_converts_to_midnight_when_timezone_provided(self):
         result = _status_event_time_entry(
-            "2026-04-06", "America/New_York", "Out of Office"
+            "2026-04-06", "Out of Office", timezone="America/New_York"
         )
         assert result == {
             "dateTime": "2026-04-06T00:00:00",
@@ -82,12 +84,12 @@ class TestOooTimeEntry:
         }
 
     def test_datetime_passed_through_unchanged(self):
-        result = _status_event_time_entry("2026-04-05T09:00:00Z", None, "Out of Office")
+        result = _status_event_time_entry("2026-04-05T09:00:00Z", "Out of Office")
         assert result == {"dateTime": "2026-04-05T09:00:00Z"}
 
     def test_timezone_added_when_provided(self):
         result = _status_event_time_entry(
-            "2026-04-05", "America/New_York", "Out of Office"
+            "2026-04-05", "Out of Office", timezone="America/New_York"
         )
         assert result == {
             "dateTime": "2026-04-05T00:00:00",
@@ -96,7 +98,7 @@ class TestOooTimeEntry:
 
     def test_timezone_added_to_datetime_input(self):
         result = _status_event_time_entry(
-            "2026-04-05T09:00:00", "Europe/London", "Out of Office"
+            "2026-04-05T09:00:00", "Out of Office", timezone="Europe/London"
         )
         assert result == {
             "dateTime": "2026-04-05T09:00:00",
@@ -104,12 +106,14 @@ class TestOooTimeEntry:
         }
 
     def test_rejects_date_only_without_timezone(self):
-        with pytest.raises(UserInputError, match="require either a timezone"):
-            _status_event_time_entry("2026-04-05", None, "Out of Office")
+        with pytest.raises(UserInputError, match="Out of Office events require"):
+            _status_event_time_entry("2026-04-05", "Out of Office", timezone=None)
 
     def test_rejects_naive_datetime_without_timezone(self):
-        with pytest.raises(UserInputError, match="require either a timezone"):
-            _status_event_time_entry("2026-04-05T09:00:00", None, "Out of Office")
+        with pytest.raises(UserInputError, match="Out of Office events require"):
+            _status_event_time_entry(
+                "2026-04-05T09:00:00", "Out of Office", timezone=None
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -321,7 +325,7 @@ async def test_create_ooo_date_only_requires_timezone():
     """Date-only OOO input must be anchored with a timezone."""
     mock_service = _create_mock_service()
 
-    with pytest.raises(UserInputError, match="require either a timezone"):
+    with pytest.raises(UserInputError, match="Out of Office events require"):
         await _create_ooo_event_impl(
             service=mock_service,
             user_google_email="user@example.com",

@@ -14,13 +14,12 @@ import pytest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 from core.utils import UserInputError
+from gcalendar.calendar_helpers import _status_event_time_entry, _validate_chat_status
 from gcalendar.calendar_tools import (
     _create_focus_time_event_impl,
     _delete_focus_time_event_impl,
-    _status_event_time_entry,
     _list_focus_time_events_impl,
     _update_focus_time_event_impl,
-    _validate_chat_status,
 )
 
 
@@ -51,7 +50,7 @@ class TestValidateChatStatus:
 class TestFocusTimeTimeEntry:
     def test_date_only_start_converts_to_midnight_when_timezone_provided(self):
         result = _status_event_time_entry(
-            "2026-04-05", "America/New_York", "Focus Time"
+            "2026-04-05", "Focus Time", "America/New_York"
         )
         assert result == {
             "dateTime": "2026-04-05T00:00:00",
@@ -59,8 +58,8 @@ class TestFocusTimeTimeEntry:
         }
 
     def test_rejects_naive_datetime_without_timezone(self):
-        with pytest.raises(UserInputError, match="require either a timezone"):
-            _status_event_time_entry("2026-04-05T09:00:00", None, "Focus Time")
+        with pytest.raises(UserInputError, match="Focus Time events require"):
+            _status_event_time_entry("2026-04-05T09:00:00", "Focus Time")
 
 
 @pytest.mark.asyncio
