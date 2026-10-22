@@ -540,6 +540,9 @@ async def create_doc(
     """
     Creates a new Google Doc and optionally inserts initial content.
 
+    `content` is inserted as plain text (Markdown is not rendered); use
+    import_to_google_doc to create a doc from Markdown.
+
     After creation, the document body starts at index 1. A new empty doc
     has total length 2 (one section break at index 0, one newline at index 1).
 
@@ -1596,7 +1599,8 @@ async def inspect_doc_structure(
     Ranges can include required empty paragraphs. Before cleanup, use detailed=true
     to check adjacent elements, formatting, and object anchors. Preserve the final
     newline and newlines before tables, tables of contents, or section breaks.
-    The final range has end == total_length and may be omitted by truncation.
+    If the body ends with an empty paragraph, that paragraph's range has
+    end == total_length; truncation may omit that range.
 
     WORKFLOW FOR TABLE INSERTION:
     Step 1: Call this function
@@ -2103,6 +2107,7 @@ async def debug_table_structure(
     user_google_email: str,
     document_id: str,
     table_index: int = 0,
+    tab_id: Optional[str] = None,
 ) -> str:
     """
     ESSENTIAL DEBUGGING TOOL - Use this whenever tables don't work as expected.
@@ -2137,18 +2142,31 @@ async def debug_table_structure(
         user_google_email: User's Google email address
         document_id: ID of the document to inspect
         table_index: Which table to debug (0 = first table, 1 = second table, etc.)
+        tab_id: Optional ID of the tab containing the table (from inspect_doc_structure).
+            If not provided, inspects the first tab.
 
     Returns:
         str: Detailed JSON structure showing table layout, cell positions, and current content
     """
     logger.debug(
-        f"[debug_table_structure] Doc={document_id}, table_index={table_index}"
+        f"[debug_table_structure] Doc={document_id}, table_index={table_index}, "
+        f"tab_id={tab_id}"
     )
 
     # Get the document
     doc = await asyncio.to_thread(
-        service.documents().get(documentId=document_id).execute
+        service.documents()
+        .get(documentId=document_id, includeTabsContent=bool(tab_id))
+        .execute
     )
+
+    if tab_id:
+        tab = _find_tab(doc.get("tabs", []), tab_id)
+        if not tab:
+            return f"Error: Tab {tab_id} not found in document."
+        if "documentTab" not in tab:
+            return f"Error: Tab {tab_id} is not a document tab and has no body content."
+        doc = tab["documentTab"]
 
     # Find tables
     tables = find_tables(doc)
@@ -2841,16 +2859,16 @@ async def get_doc_as_markdown(
     return markdown.rstrip("\n") + "\n\n" + appendix
 
 
-def _find_tab_end_index(doc: dict, target_tab_id: str) -> Optional[int]:
-    """Walk the document tabs tree and return the end index of target tab's body.
+def _find_tab_last_element(doc: dict, target_tab_id: str) -> Optional[dict]:
+    """Walk the document tabs tree and return the last element of target tab's body.
 
     Returns:
-        The end index of the tab's body content, or ``None`` when the
+        The last body element (``{}`` for an empty body), or ``None`` when the
         *target_tab_id* does not exist in the document or when the matching tab
         has no ``documentTab``.
     """
 
-    def walk(tabs: list) -> Optional[int]:
+    def walk(tabs: list) -> Optional[dict]:
         for tab in tabs:
             tab_props = tab.get("tabProperties", {})
             if tab_props.get("tabId") == target_tab_id:
@@ -2859,9 +2877,7 @@ def _find_tab_end_index(doc: dict, target_tab_id: str) -> Optional[int]:
                 document_tab = tab.get("documentTab", {})
                 body = document_tab.get("body", {})
                 content = body.get("content", [])
-                if content:
-                    return content[-1].get("endIndex", 1)
-                return 1
+                return content[-1] if content else {}
             child_tabs = tab.get("childTabs", [])
             if child_tabs:
                 found = walk(child_tabs)
@@ -3052,11 +3068,12 @@ async def manage_doc_tab(
         service.documents().get(documentId=document_id, includeTabsContent=True).execute
     )
     try:
-        tab_end = _find_tab_end_index(doc, tab_id)
+        last_element = _find_tab_last_element(doc, tab_id)
     except ValueError as exc:
         raise UserInputError(str(exc))
-    if tab_end is None:
+    if last_element is None:
         raise UserInputError(f"'{tab_id}' not found in document")
+    tab_end = last_element.get("endIndex", 1)
 
     if replace_existing:
         # tab_end includes the segment-terminating newline that Google Docs
@@ -3078,11 +3095,20 @@ async def manage_doc_tab(
     else:
         # Append after existing content instead of prepending at index 1.
         insert_at = tab_end - 1 if tab_end > 2 else 1
-        all_requests.extend(
-            markdown_to_docs_requests(
-                markdown_text, tab_id=tab_id, start_index=insert_at
-            )
+        opens_paragraph = last_element.get("startIndex", insert_at) < insert_at
+        content_start = insert_at + opens_paragraph
+        markdown_requests = markdown_to_docs_requests(
+            markdown_text, tab_id=tab_id, start_index=content_start
         )
+        if markdown_requests and opens_paragraph:
+            all_requests.append(create_insert_text_request(insert_at, "\n", tab_id))
+        if markdown_requests and "bullet" in last_element.get("paragraph", {}):
+            all_requests.append(
+                create_delete_bullet_list_request(
+                    content_start, content_start + 1, tab_id
+                )
+            )
+        all_requests.extend(markdown_requests)
 
     if not all_requests:
         return {

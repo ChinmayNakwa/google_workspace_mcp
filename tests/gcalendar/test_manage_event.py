@@ -16,11 +16,13 @@ from pydantic import TypeAdapter
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 from core.utils import UserInputError, handle_http_errors
-from gcalendar.calendar_tools import (
+from gcalendar.calendar_helpers import (
     _build_addon_conference_data,
+    _resolve_conference_data,
+)
+from gcalendar.calendar_tools import (
     _create_event_impl,
     _modify_event_impl,
-    _resolve_conference_data,
     manage_event,
 )
 
@@ -521,3 +523,50 @@ def test_manage_event_attendees_schema_accepts_mixed_and_json_string(raw, expect
     )
 
     assert TypeAdapter(annotation).validate_python(raw) == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["create", "update"])
+@pytest.mark.parametrize(
+    "color, expected", [("Tomato", "11"), (" basil ", "10"), ("5", "5")]
+)
+async def test_manage_event_resolves_color_names_and_ids(action, color, expected):
+    mock_service = _create_mock_service()
+
+    await _unwrap(manage_event)(
+        service=mock_service,
+        user_google_email="user@example.com",
+        action=action,
+        event_id="evt123",
+        summary="Meeting",
+        start_time="2026-04-06T09:00:00Z",
+        end_time="2026-04-06T09:30:00Z",
+        color_id=color,
+    )
+
+    write = (
+        mock_service.events().insert
+        if action == "create"
+        else mock_service.events().patch
+    )
+    assert write.call_args[1]["body"]["colorId"] == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("color", ["chartreuse", "0", "12"])
+async def test_manage_event_rejects_unknown_color(color):
+    mock_service = _create_mock_service()
+    mock_service.reset_mock()
+
+    with pytest.raises(UserInputError, match="tomato \\(11\\)"):
+        await _unwrap(manage_event)(
+            service=mock_service,
+            user_google_email="user@example.com",
+            action="create",
+            summary="Meeting",
+            start_time="2026-04-06T09:00:00Z",
+            end_time="2026-04-06T09:30:00Z",
+            color_id=color,
+        )
+
+    assert mock_service.mock_calls == []
