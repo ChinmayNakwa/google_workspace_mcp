@@ -703,11 +703,7 @@ def _build_quoted_reply_body(
         attribution = f"{sender} wrote:"
 
     if body_format == "html":
-        # Signature
-        sig_block = ""
-        if signature_html and signature_html.strip():
-            separator = _html_signature_separator(reply_body)
-            sig_block = f"{separator}{_wrap_signature_html(signature_html)}"
+        signed_body = _append_signature_to_body(reply_body, "html", signature_html)
 
         # Quoted original
         orig_html = original.get("html_body") or ""
@@ -722,7 +718,7 @@ def _build_quoted_reply_body(
             f"{orig_html}"
             "</blockquote></div>"
         )
-        return f"{reply_body}{sig_block}{quote_block}"
+        return f"{signed_body}{quote_block}"
 
     # Plain text path
     sig_block = ""

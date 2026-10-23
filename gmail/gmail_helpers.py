@@ -747,6 +747,8 @@ class _HTMLBlockTextExtractor(HTMLParser):
             # A nested block starts a new visual line even when its parent
             # already contains text (for example, Name<div>Title</div>).
             self._append_line_break()
+            if ("data-smartmail", "gmail_signature") in attrs:
+                self._append_line_break(force=True)
         elif tag in ("td", "th"):
             # Separating at the start tag also covers omitted </td> and </th>.
             if self._text and not self._text[-1].endswith((" ", "\n")):
@@ -1250,18 +1252,25 @@ _MARGIN_BLOCK_TAGS = frozenset(
     }
 )
 _END_TAG_RE = re.compile(r"</([a-zA-Z][a-zA-Z0-9]*)\s*>\s*")
+_TRAILING_BREAK_RE = re.compile(r"<[bh]r\b[^<>]*>\s*\Z", re.IGNORECASE)
+_RESTYLED_MARGIN_RE = re.compile(
+    rf"<style\b|<(?:{'|'.join(sorted(_MARGIN_BLOCK_TAGS))})\b[^<>]*margin",
+    re.IGNORECASE,
+)
 
 
 def _html_signature_separator(body: str) -> str:
     """Return markup leaving one blank line between an HTML body and a signature."""
     if not body.strip():
         return ""
+    if _TRAILING_BREAK_RE.search(body):
+        return "<br>"
     closed_tags = set()
     end = len(body)
     while match := _END_TAG_RE.fullmatch(body, body.rfind("</", 0, end), end):
         closed_tags.add(match[1].lower())
         end = match.start()
-    if closed_tags & _MARGIN_BLOCK_TAGS:
+    if closed_tags & _MARGIN_BLOCK_TAGS and not _RESTYLED_MARGIN_RE.search(body):
         return ""
     if closed_tags & _HTMLBlockTextExtractor._BLOCK_TAGS:
         return "<br>"

@@ -11,7 +11,11 @@ import pytest
 
 import gmail.gmail_tools as gmail_tools
 from core.utils import UserInputError
-from gmail.gmail_helpers import _signature_html_to_text, _wrap_signature_html
+from gmail.gmail_helpers import (
+    _signature_html_to_text,
+    _wrap_signature_html,
+    html_to_text_preserving_breaks,
+)
 from gmail.gmail_tools import (
     _extract_message_bodies,
     _format_body_content,
@@ -235,6 +239,10 @@ class TestHtmlSignatureSeparator:
             ("<P>Hello</P >\n", ""),
             ("<div><ul><li>Hello</li></ul></div>", ""),
             ("<p>Hello</p><span>there</span>", "<br><br>"),
+            ("Hello<br>", "<br>"),
+            ("<p>Hello</p><HR />\n", "<br>"),
+            ('<p style="margin:0">Hello</p>', "<br>"),
+            ("<style>p{margin:0}</style><p>Hello</p>", "<br>"),
             ("", ""),
         ],
     )
@@ -242,6 +250,12 @@ class TestHtmlSignatureSeparator:
         result = gmail_tools._append_signature_to_body(body, "html", self.SIGNATURE)
 
         assert result == f"{body}{separator}{self.WRAPPED}"
+
+    @pytest.mark.parametrize("body", ["Hello", "<div>Hello</div>", "<p>Hello</p>"])
+    def test_plain_alternative_keeps_blank_line_before_signature(self, body):
+        result = gmail_tools._append_signature_to_body(body, "html", self.SIGNATURE)
+
+        assert html_to_text_preserving_breaks(result) == "Hello\n\nJane"
 
     def test_quoted_reply_signature_follows_block_body(self):
         result = gmail_tools._build_quoted_reply_body(
