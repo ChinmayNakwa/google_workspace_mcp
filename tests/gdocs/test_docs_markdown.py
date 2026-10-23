@@ -336,7 +336,8 @@ class TestTextColors:
             ),
             (
                 [("re", {**RED, **LINK}), ("ad", {**BLUE, **LINK}), ("\n", {})],
-                "[re [color: #ff0000]ad](https://example.com) [color: #0000ff]\n",
+                "[re](https://example.com) [color: #ff0000]"
+                "[ad](https://example.com) [color: #0000ff]\n",
             ),
         ],
     )

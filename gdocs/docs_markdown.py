@@ -223,17 +223,24 @@ def _convert_paragraph_text(
             if text_run_link(elements, position - 1) != link:
                 link_start = len(parts)
             parts.append(_convert_text_run(elem["textRun"], skip_strikethrough))
-            # Link a label split across styled runs once, after its final run.
-            if link and text_run_link(elements, position + 1) != link:
-                parts[link_start:] = [_apply_link("".join(parts[link_start:]), link)]
             color = _text_run_color(elements, position) if include_colors else None
             if color:
                 if _text_run_color(elements, position - 1) != color:
                     color_visible = False
                 color_visible |= bool(elem["textRun"].get("content", "").strip())
-                if color_visible and _text_run_color(elements, position + 1) != color:
-                    label = parts[-1].rstrip()
-                    parts[-1] = f"{label} [color: {color}]{parts[-1][len(label) :]}"
+            color_ends = (
+                color is not None
+                and color_visible
+                and _text_run_color(elements, position + 1) != color
+            )
+            # Link a label split across styled runs once, after its final run
+            # or before a color note.
+            if link and (color_ends or text_run_link(elements, position + 1) != link):
+                parts[link_start:] = [_apply_link("".join(parts[link_start:]), link)]
+                link_start = len(parts)
+            if color_ends:
+                label = parts[-1].rstrip()
+                parts[-1] = f"{label} [color: {color}]{parts[-1][len(label) :]}"
         elif "person" in elem:
             parts.append(_convert_person_chip(elem["person"]))
         elif "richLink" in elem:
