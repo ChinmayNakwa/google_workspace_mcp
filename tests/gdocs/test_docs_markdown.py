@@ -238,6 +238,118 @@ class TestTextFormatting:
         assert "*italic*" in md
 
 
+class TestTextColors:
+    """include_colors is opt-in and defaults to False (no behavior change)."""
+
+    COLORED_DOC = {
+        "title": "Colored Test",
+        "body": {
+            "content": [
+                {"sectionBreak": {"sectionStyle": {}}},
+                {
+                    "paragraph": {
+                        "elements": [
+                            {"textRun": {"content": "Plain, ", "textStyle": {}}},
+                            {
+                                "textRun": {
+                                    "content": "purple",
+                                    "textStyle": {
+                                        "bold": True,
+                                        "foregroundColor": {
+                                            "color": {
+                                                "rgbColor": {
+                                                    "red": 0.45098039,
+                                                    "green": 0.25098039,
+                                                    "blue": 0.54901961,
+                                                }
+                                            }
+                                        },
+                                    },
+                                }
+                            },
+                            {"textRun": {"content": " text.\n", "textStyle": {}}},
+                        ],
+                        "paragraphStyle": {"namedStyleType": "NORMAL_TEXT"},
+                    }
+                },
+            ]
+        },
+    }
+
+    THEME_COLOR_DOC = {
+        "title": "Theme Colored Test",
+        "body": {
+            "content": [
+                {
+                    "paragraph": {
+                        "elements": [
+                            {
+                                "textRun": {
+                                    "content": "Themed\n",
+                                    "textStyle": {
+                                        "foregroundColor": {
+                                            "color": {"themeColor": "TEXT1"}
+                                        }
+                                    },
+                                }
+                            }
+                        ],
+                        "paragraphStyle": {"namedStyleType": "NORMAL_TEXT"},
+                    }
+                }
+            ]
+        },
+    }
+
+    def test_color_omitted_by_default(self):
+        """Without include_colors, output is unchanged for existing callers."""
+        md = convert_doc_to_markdown(self.COLORED_DOC)
+        assert md == "Plain, **purple** text.\n"
+        assert "[color:" not in md
+
+    def test_color_annotated_when_opted_in(self):
+        md = convert_doc_to_markdown(self.COLORED_DOC, include_colors=True)
+        assert md == "Plain, **purple** [color: #73408c] text.\n"
+
+    def test_theme_color_not_annotated(self):
+        """A theme color has no fixed hex value, so it is left unannotated."""
+        md = convert_doc_to_markdown(self.THEME_COLOR_DOC, include_colors=True)
+        assert "[color:" not in md
+        assert "Themed" in md
+
+    RED = {"foregroundColor": {"color": {"rgbColor": {"red": 1.0}}}}
+    BLUE = {"foregroundColor": {"color": {"rgbColor": {"blue": 1.0}}}}
+    LINK = {"link": {"url": "https://example.com"}}
+
+    @pytest.mark.parametrize(
+        "runs, expected",
+        [
+            (
+                [("Hel", {**RED, "bold": True}), ("lo", RED), (" there\n", {})],
+                "**Hel**lo [color: #ff0000] there\n",
+            ),
+            ([("Hello", {}), (" ", RED), ("world\n", {})], "Hello world\n"),
+            ([("Owner ", RED), ("next\n", {})], "Owner [color: #ff0000] next\n"),
+            (
+                [("see ", {}), ("docs", {**RED, **LINK}), ("\n", {})],
+                "see [docs](https://example.com) [color: #ff0000]\n",
+            ),
+            (
+                [("re", {**RED, **LINK}), ("ad", {**BLUE, **LINK}), ("\n", {})],
+                "[re](https://example.com) [color: #ff0000]"
+                "[ad](https://example.com) [color: #0000ff]\n",
+            ),
+        ],
+    )
+    def test_color_annotated_once_per_visible_run_group(self, runs, expected):
+        elements = [
+            {"textRun": {"content": content, "textStyle": style}}
+            for content, style in runs
+        ]
+        doc = {"body": {"content": [{"paragraph": {"elements": elements}}]}}
+        assert convert_doc_to_markdown(doc, include_colors=True) == expected
+
+
 class TestTextLinks:
     @pytest.mark.parametrize(
         "url, expected_href",
