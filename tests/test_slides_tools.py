@@ -1041,6 +1041,12 @@ class TestRenderPageToImage:
             httpx.Response(
                 200, content=b"<svg/>", headers={"content-type": "image/svg+xml"}
             ),
+            httpx.Response(
+                200,
+                content=b"\x89PNG\r\n\x1a\nfake",
+                headers={"content-type": "text/html"},
+            ),
+            httpx.Response(200, content=b"\x89PNG\r\n\x1a\nfake"),
             httpx.ConnectError("unreachable"),
         ],
     )

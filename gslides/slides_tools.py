@@ -828,8 +828,9 @@ async def _fetch_page_image(url: str) -> Optional[ImageContent]:
             f"[render_page_to_image] Image fetch failed: {type(exc).__name__}"
         )
         return None
+    content_type = response.headers.get("content-type", "").lower()
     mime_type = sniff_inline_image_mime_type(response.content)
-    if mime_type is None:
+    if not content_type.startswith("image/") or mime_type is None:
         logger.warning("[render_page_to_image] Image fetch returned a non-image")
         return None
     return image_content_from_bytes(response.content, mime_type)
