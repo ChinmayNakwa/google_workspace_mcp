@@ -19,7 +19,9 @@ from auth.service_decorator import require_google_service
 from core.server import server
 from core.utils import UserInputError, handle_http_errors, StringList
 from gcontacts.contacts_helpers import (
+    DEFAULT_PERSON_FIELDS,
     _format_contact,
+    _list_contacts,
     _merge_emails,
     _merge_names,
     _merge_nicknames,
@@ -32,9 +34,6 @@ from gcontacts.contacts_helpers import (
 )
 
 logger = logging.getLogger(__name__)
-
-# Default person fields for list/search operations
-DEFAULT_PERSON_FIELDS = "names,nicknames,emailAddresses,phoneNumbers,organizations"
 
 # Detailed person fields for get operations
 DETAILED_PERSON_FIELDS = (
@@ -572,66 +571,39 @@ async def _warmup_search_cache(service: Resource, user_google_email: str) -> Non
     ),
 )
 @require_google_service("people", "contacts_read")
-@handle_http_errors("list_contacts", service_type="people")
+@handle_http_errors("list_contacts", is_read_only=True, service_type="people")
 async def list_contacts(
     service: Resource,
     user_google_email: str,
     page_size: int = 100,
     page_token: Optional[str] = None,
     sort_order: Optional[str] = None,
+    request_sync_token: bool = False,
+    sync_token: Optional[str] = None,
 ) -> str:
     """
-    List contacts for the authenticated user.
+    List contacts for the authenticated user, optionally as a full or incremental sync.
 
     Args:
         user_google_email (str): The user's Google email address. Required.
         page_size (int): Maximum number of contacts to return (default: 100, max: 1000).
-        page_token (Optional[str]): Token for pagination.
-        sort_order (Optional[str]): Sort order: "LAST_MODIFIED_ASCENDING", "LAST_MODIFIED_DESCENDING", "FIRST_NAME_ASCENDING", or "LAST_NAME_ASCENDING".
+        page_token (Optional[str]): Token for pagination. Keep all other arguments unchanged when following it.
+        sort_order (Optional[str]): Sort order: "LAST_MODIFIED_ASCENDING", "LAST_MODIFIED_DESCENDING", "FIRST_NAME_ASCENDING", or "LAST_NAME_ASCENDING". Not supported when syncing.
+        request_sync_token (bool): Start a full sync. The last page returns a sync token.
+        sync_token (Optional[str]): List only changes since the sync that returned this token, marking deleted contacts. The last page returns a new sync token.
 
     Returns:
         str: List of contacts with their basic information.
     """
-    logger.info(f"[list_contacts] Invoked. Email: '{user_google_email}'")
-
-    if page_size < 1:
-        raise UserInputError("page_size must be >= 1")
-    page_size = min(page_size, 1000)
-
-    params: Dict[str, Any] = {
-        "resourceName": "people/me",
-        "personFields": DEFAULT_PERSON_FIELDS,
-        "pageSize": page_size,
-    }
-
-    if page_token:
-        params["pageToken"] = page_token
-    if sort_order:
-        params["sortOrder"] = sort_order
-
-    result = await asyncio.to_thread(
-        service.people().connections().list(**params).execute
+    return await _list_contacts(
+        service,
+        user_google_email,
+        page_size,
+        page_token,
+        sort_order,
+        request_sync_token,
+        sync_token,
     )
-
-    connections = result.get("connections", [])
-    next_page_token = result.get("nextPageToken")
-    total_people = result.get("totalPeople", len(connections))
-
-    if not connections:
-        return f"No contacts found for {user_google_email}."
-
-    response = (
-        f"Contacts for {user_google_email} ({len(connections)} of {total_people}):\n\n"
-    )
-
-    for person in connections:
-        response += _format_contact(person) + "\n\n"
-
-    if next_page_token:
-        response += f"Next page token: {next_page_token}"
-
-    logger.info(f"Found {len(connections)} contacts for {user_google_email}")
-    return response
 
 
 @server.tool(
