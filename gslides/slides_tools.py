@@ -862,12 +862,14 @@ async def render_page_to_image(
         page_object_id (str): The object ID of the page/slide to render.
         size (str): Image width. One of "SMALL" (200px), "MEDIUM" (800px),
             "LARGE" (1600px) or "WIDTH2000_PX" (2000px). Defaults to "MEDIUM".
-            Start at MEDIUM (~450-500 image tokens): it reads titles and body
-            text. Use LARGE (~1,750-1,900 tokens) for small text such as
-            tables, chart labels and footnotes. WIDTH2000_PX (~2,700-3,000
-            tokens) rarely reads more than LARGE. SMALL shows layout only; its
-            text is unreadable. Costs are for Claude and GPT; DeepSeek costs
-            about half.
+            Start at MEDIUM: it reads titles and body text. Use LARGE for small
+            text such as tables, chart labels and footnotes. WIDTH2000_PX
+            rarely reads more than LARGE. SMALL shows layout only; its text is
+            unreadable. Token cost and the resolution the model sees depend on
+            the model: Claude models with high-resolution vision read MEDIUM at
+            ~460 image tokens, LARGE at ~1,850 and WIDTH2000_PX at ~2,900, while
+            other models may downscale LARGE and WIDTH2000_PX and count tokens
+            differently.
 
     Returns:
         A short text block (presentation ID, page ID, size and a temporary
@@ -875,7 +877,7 @@ async def render_page_to_image(
         cannot be fetched, only the text block is returned, with a note saying
         so.
     """
-    width = validate_page_image_size(size)
+    requested_width = validate_page_image_size(size)
     logger.info(
         f"[render_page_to_image] Invoked. Email: '{user_google_email}', Presentation: '{presentation_id}', Page: '{page_object_id}', Size: '{size}'"
     )
@@ -893,11 +895,15 @@ async def render_page_to_image(
     )
 
     image_url = result.get("contentUrl", "")
+    width = result.get("width", requested_width)
+    dimensions = (
+        f"{width}x{result['height']}px" if "height" in result else f"{width}px wide"
+    )
 
     text = f"""Rendered page:
 - Presentation ID: {presentation_id}
 - Page ID: {page_object_id}
-- Size: {size} ({width}px wide)
+- Size: {size} ({dimensions})
 - Image URL: {image_url or "(none returned)"}
   (expires after about 30 minutes and is tagged with the requesting account;
   anyone holding it can open the image while it lasts)"""

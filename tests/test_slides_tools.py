@@ -1004,6 +1004,20 @@ class TestRenderPageToImage:
         assert f"{size} ({width}px wide)" in out.content[0].text
 
     @pytest.mark.asyncio
+    async def test_reports_dimensions_returned_by_the_api(self, monkeypatch):
+        self._mock_fetch(monkeypatch, self._png_handler())
+        service = self._service()
+        service.presentations.return_value.pages.return_value.getThumbnail.return_value.execute.return_value = {
+            "contentUrl": self.URL,
+            "width": 450,
+            "height": 800,
+        }
+        out = await _unwrap(slides_tools.render_page_to_image)(
+            service, "u@example.com", "pres", "p1"
+        )
+        assert "MEDIUM (450x800px)" in out.content[0].text
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize("size", ["HUGE", "medium", ""])
     async def test_invalid_size_is_rejected_before_calling_the_api(self, size):
         service = self._service()
