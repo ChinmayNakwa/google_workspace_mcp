@@ -280,6 +280,23 @@ class TestModifyDocTextHeading:
         assert requests[1]["insertText"]["location"]["index"] == 36
 
     @pytest.mark.asyncio
+    async def test_append_into_empty_trailing_bullet_drops_bullet(self):
+        doc = _doc()
+        doc["body"]["content"][5] = _para(31, "Tail\n", bullet=True)
+        doc["body"]["content"].append(_para(36, "\n", bullet=True))
+        service = _service(doc)
+        await _call(service, heading="Details", text="More", end_of_segment=True)
+
+        requests = _batch_body(service)["requests"]
+        assert requests[0] == {
+            "deleteParagraphBullets": {"range": {"startIndex": 36, "endIndex": 37}}
+        }
+        assert requests[1]["insertText"] == {
+            "text": "More\n",
+            "location": {"index": 36},
+        }
+
+    @pytest.mark.asyncio
     async def test_replace_under_trailing_heading_with_empty_body_appends(self):
         doc = _doc()
         doc["body"]["content"] = doc["body"]["content"][:5]

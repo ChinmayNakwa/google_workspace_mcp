@@ -564,18 +564,17 @@ def build_section_markdown_requests(
     body_start, section_end = section["body_start"], section["section_end"]
     last_paragraph = section["last_paragraph"]
     at_body_end = section_end == last_paragraph["endIndex"] - 1
-    bulleted = "bullet" in last_paragraph.get("paragraph", {})
+    drop_bullet = at_body_end and "bullet" in last_paragraph.get("paragraph", {})
     if append or section_end <= body_start:
-        split = at_body_end and last_paragraph["startIndex"] < section_end
         return build_markdown_insert_requests(
             markdown_text,
             section_end,
             tab_id,
-            split_paragraph=split,
-            drop_bullet=split and bulleted,
+            split_paragraph=at_body_end and last_paragraph["startIndex"] < section_end,
+            drop_bullet=drop_bullet,
         )
     insert_requests = build_markdown_insert_requests(
-        markdown_text, body_start, tab_id, drop_bullet=at_body_end and bulleted
+        markdown_text, body_start, tab_id, drop_bullet=drop_bullet
     )
     if not insert_requests:
         return []
