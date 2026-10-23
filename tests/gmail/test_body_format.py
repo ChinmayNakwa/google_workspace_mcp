@@ -394,6 +394,32 @@ class TestExtractMessageBodies:
         assert bodies["text"] == "Nested text"
         assert bodies["html"] == "<p>Nested HTML</p>"
 
+    @pytest.mark.parametrize(
+        ("content_type", "raw", "expected"),
+        [
+            ('text/plain; charset="iso-8859-1"', "Café".encode("latin-1"), "Café"),
+            ("text/plain; charset=windows-1252", "“naïve”".encode("cp1252"), "“naïve”"),
+            (
+                "text/plain; charset=ISO-2022-JP",
+                "日本語".encode("iso-2022-jp"),
+                "日本語",
+            ),
+            ("text/plain; charset=windows-1252", b"caf\xe9\x81", "café"),
+            ("text/plain; charset=us-ascii", "Café".encode(), "Café"),
+            ("text/plain; charset=x-unknown", "Café".encode(), "Café"),
+            ("text/plain", "Café".encode(), "Café"),
+        ],
+    )
+    def test_decodes_declared_charset(self, content_type, raw, expected):
+        part = {
+            "mimeType": "text/plain",
+            "headers": [{"name": "Content-Type", "value": content_type}],
+            "body": {"data": base64.urlsafe_b64encode(raw).decode()},
+        }
+        multipart = {"mimeType": "multipart/alternative", "parts": [part]}
+        assert _extract_message_bodies(part)["text"] == expected
+        assert _extract_message_bodies(multipart)["text"] == expected
+
 
 @pytest.mark.asyncio
 async def test_get_gmail_message_content_returns_raw_mime():

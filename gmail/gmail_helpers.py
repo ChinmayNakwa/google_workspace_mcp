@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import re
 import secrets
@@ -10,6 +11,7 @@ import ssl
 from collections import Counter
 from datetime import datetime, timezone
 from email.header import Header
+from email.message import Message
 from email.utils import getaddresses, parseaddr, parsedate_to_datetime
 from html.parser import HTMLParser
 from typing import Any, Callable, Dict, Iterable, List, Literal, Mapping, Optional
@@ -780,6 +782,25 @@ class _HTMLBlockTextExtractor(HTMLParser):
         text = "\n".join(lines)
         text = re.sub(r"\n{3,}", "\n\n", text)
         return text.strip()
+
+
+def decode_part_body(part: Mapping[str, Any]) -> str:
+    """Decode a Gmail payload part's inline body using its declared charset."""
+    raw = base64.urlsafe_b64decode(part["body"]["data"])
+    headers = Message()
+    for header in part.get("headers", []):
+        headers[header["name"]] = header["value"]
+    charset = headers.get_content_charset() or "utf-8"
+    for codec, errors in (
+        (charset, "strict"),
+        ("utf-8", "strict"),
+        (charset, "ignore"),
+    ):
+        try:
+            return raw.decode(codec, errors)
+        except (LookupError, UnicodeError):
+            continue
+    return raw.decode("utf-8", errors="ignore")
 
 
 def html_to_text_preserving_breaks(html_content: str) -> str:
