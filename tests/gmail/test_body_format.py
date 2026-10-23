@@ -173,6 +173,73 @@ class TestFormatBodyContentTextMode:
         result = _format_body_content("", long_html)
         assert "[Content truncated...]" in result
 
+    def test_appends_html_links_missing_from_plain_text(self):
+        html = '<p>Ready.</p><a href="https://example.com/export/abc">Download Data</a>'
+        result = _format_body_content(
+            "Ready.\n\nDownload Data", html, include_links=True
+        )
+        assert result == (
+            "Ready.\n\nDownload Data\n\n--- LINKS ---\n"
+            "- Download Data: https://example.com/export/abc"
+        )
+
+    def test_appends_links_to_html_fallback(self):
+        html = '<p>Hi</p> <a href=" https://x.example/?a=1&amp;b=2 ">Go</a>'
+        result = _format_body_content("", html, include_links=True)
+        assert result == "Hi Go\n\n--- LINKS ---\n- Go: https://x.example/?a=1&b=2"
+
+    def test_link_listing_skips_known_duplicate_and_non_http_urls(self):
+        html = (
+            '<a href="https://known.example">Known</a>'
+            '<a href="mailto:a@example.com">Mail</a>'
+            '<a href="javascript:void(0)">JS</a>'
+            '<a href="#top">Top</a>'
+            "<a>No href</a>"
+            '<a href="HTTPS://new.example/x"><img src="logo.png"></a>'
+            '<a href="HTTPS://new.example/x">Ünïcode  label</a>'
+            '<a href="http://plain.example">http://plain.example</a>'
+        )
+        result = _format_body_content(
+            "See https://known.example", html, include_links=True
+        )
+        assert result == (
+            "See https://known.example\n\n--- LINKS ---\n"
+            "- Ünïcode label: HTTPS://new.example/x\n"
+            "- http://plain.example"
+        )
+
+    def test_lists_link_that_only_prefixes_a_url_in_text(self):
+        html = '<a href="https://example.com">Home</a>'
+        shown = _format_body_content(
+            "Visit https://example.com.", html, include_links=True
+        )
+        prefix = _format_body_content(
+            "Unsub: https://example.com/u", html, include_links=True
+        )
+        assert shown == "Visit https://example.com."
+        assert prefix == (
+            "Unsub: https://example.com/u\n\n--- LINKS ---\n- Home: https://example.com"
+        )
+
+    def test_keeps_links_before_a_malformed_declaration(self):
+        html = '<a href="https://a.example">A</a><![foo[ x ]]><a href="https://b.example">B</a>'
+        result = _format_body_content("Body", html, include_links=True)
+        assert result == "Body\n\n--- LINKS ---\n- A: https://a.example"
+
+    def test_lists_links_when_html_has_no_text(self):
+        html = '<a href="https://example.com/x"><img src="logo.png"></a>'
+        result = _format_body_content("", html, include_links=True)
+        assert result == (
+            "[No readable content found]\n\n--- LINKS ---\n- https://example.com/x"
+        )
+
+    def test_no_link_section_without_http_links(self):
+        assert (
+            _format_body_content("Hi", '<a href="#x">Hi</a>', include_links=True)
+            == "Hi"
+        )
+        assert _format_body_content("Hi", "", include_links=True) == "Hi"
+
     def test_html_to_text_separates_br_text(self):
         assert _html_to_text("<div>Best,<br>Alice</div>") == "Best, Alice"
 
@@ -602,6 +669,66 @@ async def test_get_gmail_thread_content_supports_raw_format():
     assert result.count("--- RAW MIME ---") == 2
     assert "Thread raw MIME 1" in result
     assert "Thread raw MIME 2" in result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("text", "html", "body"),
+    [
+        (
+            "Ready.\r\nDownload Data\r\n",
+            '<p>Ready.</p><a href="https://example.com/export/abc">Download Data</a>',
+            "Ready.\r\nDownload Data\r\n",
+        ),
+        ("", '<p>Hi</p> <a href="https://example.com/x">Go</a>', "Hi Go"),
+    ],
+)
+async def test_get_gmail_message_content_omits_links_by_default(text, html, body):
+    service = _build_service(
+        message_responses={
+            ("msg-1", "metadata"): _metadata_response("msg-1"),
+            ("msg-1", "full"): _message_response("msg-1", text=text, html=html),
+        }
+    )
+
+    result = await _unwrap(get_gmail_message_content)(
+        service=service,
+        message_id="msg-1",
+        user_google_email="user@example.com",
+    )
+
+    assert result == (
+        "Subject: Example subject\n"
+        "From: sender@example.com\n"
+        "Date: Fri, 28 Mar 2026 10:00:00 -0400\n"
+        "Message-ID: <message@example.com>\n"
+        "To: recipient@example.com\n"
+        "Cc: cc@example.com\n"
+        f"\n--- BODY ---\n{body}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_gmail_thread_content_lists_html_links():
+    html = '<p>Ready.</p><a href="https://example.com/export/abc">Download Data</a>'
+    service = _build_service(
+        thread_responses={
+            ("thread-1", "full"): {
+                "messages": [
+                    _thread_message("msg-1", text="Ready.\nDownload Data", html=html)
+                ]
+            }
+        },
+    )
+
+    result = await _unwrap(get_gmail_thread_content)(
+        service=service,
+        thread_id="thread-1",
+        user_google_email="user@example.com",
+        include_links=True,
+    )
+
+    assert "- Download Data: https://example.com/export/abc" in result
 
 
 @pytest.mark.asyncio

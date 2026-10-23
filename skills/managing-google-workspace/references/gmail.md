@@ -34,6 +34,7 @@ Get full content of a single message (subject, sender, recipients, date, Message
 | format | string | no | "full" | "full" (with body and attachments) or "metadata" (headers only) |
 | body_format | string | no | "text" | "text" (plaintext, HTML converted as fallback), "html" (raw HTML body) or "raw" (decoded MIME); requires format="full" |
 | full | boolean | no | false | Return the complete untruncated message as a file path (stdio) or download URL (HTTP) instead of the inline body, which is truncated at 20,000 chars. body_format picks the export type ("raw" gives a byte-exact .eml). Stateless mode without GCS staging returns it inline. Requires format="full" |
+| include_links | boolean | no | false | Append a LINKS section listing the http(s) URLs from the HTML body that the text output omits; only applies to body_format="text" |
 
 ### get_gmail_messages_content_batch
 Get content of multiple messages in one request. Auto-batches in chunks of 25.
@@ -44,6 +45,7 @@ Get content of multiple messages in one request. Auto-batches in chunks of 25.
 | user_google_email | string | yes | | |
 | format | string | no | "full" | "full" (with body) or "metadata" (headers only) |
 | body_format | string | no | "text" | "text" (plaintext, HTML converted as fallback), "html" (raw HTML body) or "raw" (decoded MIME); requires format="full" |
+| include_links | boolean | no | false | Append a LINKS section listing the http(s) URLs from the HTML body that the text output omits; only applies to body_format="text" |
 
 ### get_gmail_thread_content
 Get all messages in a conversation thread.
@@ -54,6 +56,7 @@ Get all messages in a conversation thread.
 | user_google_email | string | yes | | |
 | body_format | string | no | "text" | "text" (plaintext, HTML converted as fallback), "html" (raw HTML body) or "raw" (decoded MIME) |
 | include_analysis | boolean | no | false | Return a dict with the thread content plus ownership analysis (last sender, ball-in-court verdict, per-sender counts, participants) instead of a string |
+| include_links | boolean | no | false | Append a LINKS section listing the http(s) URLs from the HTML body that the text output omits; only applies to body_format="text" |
 
 ### get_gmail_threads_content_batch
 Get content of multiple threads in one request. Auto-batches in chunks of 25.
@@ -63,6 +66,7 @@ Get content of multiple threads in one request. Auto-batches in chunks of 25.
 | thread_ids | array of strings | yes | | |
 | user_google_email | string | yes | | |
 | body_format | string | no | "text" | "text" (plaintext, HTML converted as fallback), "html" (raw HTML body) or "raw" (decoded MIME) |
+| include_links | boolean | no | false | Append a LINKS section listing the http(s) URLs from the HTML body that the text output omits; only applies to body_format="text" |
 
 ### get_gmail_attachment_content
 Download an attachment to local disk (stdio mode) or get a temporary URL (HTTP mode, 1-hour expiry).

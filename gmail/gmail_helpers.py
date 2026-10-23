@@ -801,6 +801,60 @@ def html_to_text_preserving_breaks(html_content: str) -> str:
         return html_content
 
 
+class _HTMLLinkExtractor(HTMLParser):
+    """Collect http(s) anchor URLs mapped to their visible text, in document order."""
+
+    def __init__(self):
+        super().__init__()
+        self.links: Dict[str, str] = {}
+        self._href: Optional[str] = None
+        self._text: List[str] = []
+
+    def _flush(self) -> None:
+        if self._href is not None and not self.links.get(self._href):
+            self.links[self._href] = " ".join("".join(self._text).split())
+        self._href = None
+        self._text = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag != "a":
+            return
+        self._flush()
+        href = (dict(attrs).get("href") or "").strip()
+        if href.lower().startswith(("http://", "https://")):
+            self._href = href
+
+    def handle_endtag(self, tag):
+        if tag == "a":
+            self._flush()
+
+    def handle_data(self, data):
+        if self._href is not None:
+            self._text.append(data)
+
+    def close(self):
+        super().close()
+        self._flush()
+
+
+def format_html_links(html_body: str, known_text: str) -> str:
+    """Return a LINKS section for http(s) anchors in ``html_body`` absent from ``known_text``."""
+    if not html_body:
+        return ""
+    parser = _HTMLLinkExtractor()
+    try:
+        parser.feed(html_body)
+        parser.close()
+    except AssertionError:
+        logger.debug("Stopped HTML link extraction at a malformed declaration")
+    lines = [
+        f"- {text}: {url}" if text and text != url else f"- {url}"
+        for url, text in parser.links.items()
+        if not re.search(re.escape(url) + r"(?![\w/?#&=%~+-])", known_text)
+    ]
+    return "\n\n--- LINKS ---\n" + "\n".join(lines) if lines else ""
+
+
 _HTML_BLOCK_TAGS = frozenset(
     {
         "address",
