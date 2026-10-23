@@ -1232,6 +1232,42 @@ def _signature_html_to_text(signature_html: str) -> str:
     return html_to_text_preserving_breaks(signature_html)
 
 
+_MARGIN_BLOCK_TAGS = frozenset(
+    {
+        "blockquote",
+        "dl",
+        "figure",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "ol",
+        "p",
+        "pre",
+        "ul",
+    }
+)
+_END_TAG_RE = re.compile(r"</([a-zA-Z][a-zA-Z0-9]*)\s*>\s*")
+
+
+def _html_signature_separator(body: str) -> str:
+    """Return markup leaving one blank line between an HTML body and a signature."""
+    if not body.strip():
+        return ""
+    closed_tags = set()
+    end = len(body)
+    while match := _END_TAG_RE.fullmatch(body, body.rfind("</", 0, end), end):
+        closed_tags.add(match[1].lower())
+        end = match.start()
+    if closed_tags & _MARGIN_BLOCK_TAGS:
+        return ""
+    if closed_tags & _HTMLBlockTextExtractor._BLOCK_TAGS:
+        return "<br>"
+    return "<br><br>"
+
+
 def _wrap_signature_html(signature_html: str) -> str:
     """Wrap signature HTML in the marker Gmail clients use to detect a signed draft."""
     return (

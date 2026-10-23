@@ -11,7 +11,7 @@ import pytest
 
 import gmail.gmail_tools as gmail_tools
 from core.utils import UserInputError
-from gmail.gmail_helpers import _signature_html_to_text
+from gmail.gmail_helpers import _signature_html_to_text, _wrap_signature_html
 from gmail.gmail_tools import (
     _extract_message_bodies,
     _format_body_content,
@@ -218,6 +218,37 @@ class TestSignatureHtmlToText:
         signature = "<table><tr><th>Name<th>Title<tr><td>Jane<td>Founder</table>"
 
         assert _signature_html_to_text(signature) == "Name Title\nJane Founder"
+
+
+class TestHtmlSignatureSeparator:
+    SIGNATURE = "<div>Jane</div>"
+    WRAPPED = _wrap_signature_html(SIGNATURE)
+
+    @pytest.mark.parametrize(
+        ("body", "separator"),
+        [
+            ("Hello", "<br><br>"),
+            ("<b>Hello</b>", "<br><br>"),
+            ("<div>Hello</div>", "<br>"),
+            ("<table><tr><td>Hello</td></tr></table>", "<br>"),
+            ("<p>Hello</p>", ""),
+            ("<P>Hello</P >\n", ""),
+            ("<div><ul><li>Hello</li></ul></div>", ""),
+            ("<p>Hello</p><span>there</span>", "<br><br>"),
+            ("", ""),
+        ],
+    )
+    def test_appended_signature_gets_one_blank_line(self, body, separator):
+        result = gmail_tools._append_signature_to_body(body, "html", self.SIGNATURE)
+
+        assert result == f"{body}{separator}{self.WRAPPED}"
+
+    def test_quoted_reply_signature_follows_block_body(self):
+        result = gmail_tools._build_quoted_reply_body(
+            "<p>Thanks</p>", "html", self.SIGNATURE, {"html_body": "<p>Hi</p>"}
+        )
+
+        assert result.startswith(f"<p>Thanks</p>{self.WRAPPED}")
 
 
 class TestHtmlPlainTextAlternative:
