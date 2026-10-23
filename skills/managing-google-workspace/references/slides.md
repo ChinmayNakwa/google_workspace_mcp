@@ -3,7 +3,7 @@
 MCP tools for reading, creating, and updating Google Slides presentations. All tools require `user_google_email` (string, required).
 
 ## Contents
-- Reading Presentations: get_presentation, get_page, get_page_thumbnail
+- Reading Presentations: get_presentation, get_page, render_page_to_image
 - Creating & Updating: create_presentation, batch_update_presentation
 - Speaker Notes
 - Comments: list_presentation_comments, manage_presentation_comment
@@ -31,17 +31,30 @@ Get details about a specific slide, including its elements and layout.
 | presentation_id | string | yes | | |
 | page_object_id | string | yes | | |
 
-### get_page_thumbnail
-Generate a thumbnail URL for a slide.
+### render_page_to_image
+Render a slide (or any page, including a notes page) to a PNG and return it as image content, so you can look at the slide's layout and visuals.
 
 | Parameter | Type | Required | Default | Notes |
 |-----------|------|----------|---------|-------|
 | user_google_email | string | yes | | |
 | presentation_id | string | yes | | |
 | page_object_id | string | yes | | |
-| thumbnail_size | string | no | MEDIUM | |
+| size | string | no | MEDIUM | `SMALL`, `MEDIUM`, `LARGE`, or `WIDTH2000_PX` |
 
-`thumbnail_size` accepts `LARGE`, `MEDIUM`, or `SMALL`.
+`size` sets the image width:
+
+| Size | Width | Approx. Claude image tokens | Use for |
+|------|-------|-----------------------------|---------|
+| `SMALL` | 200px | ~30 | layout only; text is unreadable |
+| `MEDIUM` | 800px | ~460 | titles and body text |
+| `LARGE` | 1600px | ~1,850 | small text: tables, chart labels, footnotes |
+| `WIDTH2000_PX` | 2000px | ~2,900 | rarely reads more than `LARGE` |
+
+Token cost and the resolution the model sees depend on the model. The figures above are for Claude models with high-resolution vision, which read every size as rendered. Other models may downscale `LARGE` and `WIDTH2000_PX` and count image tokens differently, so a larger size may not show more detail.
+
+Start at `MEDIUM`, and re-render at `LARGE` only for a slide whose small text you need to read. Any other value is rejected before the API is called.
+
+The result is a short text block (presentation ID, page ID, size with the rendered pixel dimensions, and the image URL) followed by the image. If the image cannot be fetched, only the text block comes back, with a note saying so.
 
 ---
 
@@ -151,4 +164,4 @@ Create, reply to, or resolve a comment.
 
 **Batch ordering**: Requests in a batch execute sequentially. Earlier requests can create elements that later requests reference by object ID. If a request fails, subsequent requests in the batch are skipped.
 
-**Thumbnails**: Thumbnail URLs returned by `get_page_thumbnail` are temporary. Fetch them promptly after generation.
+**Rendered images**: The image URL in the text block returned by `render_page_to_image` expires after about 30 minutes and is tagged with the requesting account, so anyone holding it can open the image until then. Use it promptly and don't share it. The image itself is already in the result, so you rarely need the URL.
