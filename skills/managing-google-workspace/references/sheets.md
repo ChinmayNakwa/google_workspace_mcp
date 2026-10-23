@@ -256,7 +256,7 @@ List all comments on a spreadsheet.
 |-----------|------|----------|---------|-------|
 | user_google_email | string | yes | | |
 | spreadsheet_id | string | yes | | |
-| max_comments | integer | no | 100 | Cap on comments returned; must be at least 1. Default comes from `WORKSPACE_MCP_COMMENTS_MAX` (100 if unset) |
+| max_comments | integer | no | 100 | Cap on comments returned; must be at least 1. Default comes from `WORKSPACE_MCP_COMMENTS_MAX`; unset, invalid, or non-positive values fall back to 100 |
 
 ### manage_spreadsheet_comment
 Create, reply to, or resolve a comment.

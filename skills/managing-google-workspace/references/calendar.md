@@ -165,7 +165,7 @@ Check free/busy status for one or more calendars over a time interval.
 
 **Calendar IDs**: Use `list_calendars` to discover IDs. The primary calendar can always be referenced as `primary`.
 
-**Time format**: All time parameters use RFC 3339. Date-only values (e.g. `2026-03-19`) are accepted and interpreted as midnight UTC, except Out of Office and Focus Time boundaries, which need a `timezone` (see Status Events).
+**Time format**: Time parameters use RFC 3339. What a date-only value (e.g. `2026-03-19`) means depends on the parameter: date-only `manage_event` boundaries create an all-day event, Out of Office and Focus Time boundaries need a `timezone` (see Status Events), and query bounds such as `get_events` and `query_freebusy` `time_min`/`time_max` are read as midnight UTC.
 
 **All-day events**: Set `start_time` and `end_time` to date-only strings (e.g. `2026-03-20` and `2026-03-21` for a single all-day event on 20 March).
 
