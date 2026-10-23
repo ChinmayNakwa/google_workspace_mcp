@@ -5,7 +5,7 @@ description: >
   Supports MCP tools or the workspace-cli client. Provides tool routing, workflows, and parameter guidance for every tool.
   Triggers for "check my email", "find a file", "schedule a meeting", "update the spreadsheet", "share a doc",
   "create a presentation", "add a task", "look up a contact", or any mention of Google Workspace services.
-allowed-tools: Bash(workspace-cli *)
+allowed-tools: Bash(workspace-cli *), Bash(uv run workspace-cli *)
 user-invocable: false
 ---
 
@@ -28,7 +28,7 @@ workspace-cli call <tool_name> user_google_email=USER_EMAIL key=value ...
 
 - Arguments are `key=value` pairs; values are parsed as JSON when possible, so pass lists and objects as JSON (e.g. `label_ids='["INBOX"]'`).
 - The server must be reachable over HTTP. The default URL is `http://localhost:8000/mcp` (a server started with `--transport streamable-http`); override it with `--url` before the subcommand (`workspace-cli --url <url> call ...`) or `WORKSPACE_MCP_URL`. Plugin users on stdio can set `WORKSPACE_MCP_HTTP_PORT` to expose a loopback sidecar at `http://127.0.0.1:<port>/mcp`.
-- If `workspace-cli` is not on PATH, install it with `uv tool install .` from a checkout of this repo, or run `uv run workspace-cli` inside it. Never use `uvx workspace-cli`: an unrelated, abandoned PyPI package squats that name.
+- If `workspace-cli` is not on PATH, run `uv run workspace-cli` from a checkout of this repo. Installing it permanently (`uv tool install .` in that checkout) is a manual setup step for the user. Never use `uvx workspace-cli`: an unrelated, abandoned PyPI package squats that name.
 
 Before calling a tool, read the relevant reference file for exact parameter names and types. Only use parameters documented there -- do not invent parameters.
 

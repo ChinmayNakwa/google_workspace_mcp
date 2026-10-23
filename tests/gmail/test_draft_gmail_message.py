@@ -1935,6 +1935,27 @@ async def test_send_gmail_message_reply_all_excludes_the_send_as_alias_from_to()
 
 
 @pytest.mark.asyncio
+async def test_send_gmail_message_reply_all_stops_without_reply_context():
+    mock_service = _mock_gmail_service()
+    mock_service.users().threads().get().execute.return_value = {"messages": []}
+
+    # An explicit 'to' must not let the send go through with only the caller's
+    # recipients, silently dropping everyone reply-all would add.
+    with pytest.raises(UserInputError, match="reply-all recipients cannot be derived"):
+        await _unwrap(send_gmail_message)(
+            service=mock_service,
+            user_google_email="user@example.com",
+            to="alice@example.com",
+            subject="Re: Meeting tomorrow",
+            body="Thanks all.",
+            thread_id="thread123",
+            reply_all=True,
+        )
+
+    mock_service.users.return_value.messages.return_value.send.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_send_gmail_message_reply_all_requires_a_thread_id():
     mock_service = _mock_gmail_service()
 
@@ -2017,6 +2038,28 @@ async def test_draft_gmail_message_reply_all_derives_recipients():
     assert parsed["To"] == "alice@example.com"
     # The authenticated account is dropped; everyone else on the message is kept.
     assert parsed["Cc"] == "bob@example.com, carol@example.com"
+
+
+@pytest.mark.asyncio
+async def test_draft_gmail_message_reply_all_stops_without_reply_context():
+    mock_service = _mock_gmail_service()
+    mock_service.users().threads().get().execute.return_value = {"messages": []}
+
+    # An explicit subject must not let the draft fall through with only the
+    # caller's recipients, silently dropping everyone reply-all would add.
+    with pytest.raises(UserInputError, match="reply-all recipients cannot be derived"):
+        await _unwrap(draft_gmail_message)(
+            service=mock_service,
+            user_google_email="user@example.com",
+            to="alice@example.com",
+            subject="Re: Meeting tomorrow",
+            body="Thanks all.",
+            thread_id="thread123",
+            reply_all=True,
+            include_signature=False,
+        )
+
+    mock_service.users.return_value.drafts.return_value.create.assert_not_called()
 
 
 @pytest.mark.asyncio

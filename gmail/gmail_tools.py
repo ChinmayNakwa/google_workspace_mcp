@@ -2919,7 +2919,13 @@ async def send_gmail_message(
             target_reply,
         )
 
-    if reply_all and target_reply:
+    if reply_all:
+        if not target_reply:
+            raise UserInputError(
+                f"Could not load the message to reply to in thread '{thread_id}', "
+                "so reply-all recipients cannot be derived. Retry, or pass 'to' "
+                "and 'cc' explicitly without 'reply_all'."
+            )
         to, cc = _derive_reply_all_recipients(
             target_reply, {user_google_email, sender_email}, to, cc
         )
@@ -3526,7 +3532,13 @@ async def draft_gmail_message(
             thread_message_ids, in_reply_to, references, target_reply
         )
 
-    if reply_all and target_reply:
+    if reply_all:
+        if not target_reply:
+            raise UserInputError(
+                f"Could not load the message to reply to in thread '{thread_id}', "
+                "so reply-all recipients cannot be derived. Retry, or pass 'to' "
+                "and 'cc' explicitly without 'reply_all'."
+            )
         to, cc = _derive_reply_all_recipients(
             target_reply, {user_google_email, sender_email}, to, cc
         )

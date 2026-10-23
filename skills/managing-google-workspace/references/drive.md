@@ -314,7 +314,7 @@ Imports a file (Markdown, DOCX, TXT, HTML, RTF, ODT) into Google Docs format wit
 | base64_content | string | no | | Standard base64-encoded bytes for a binary source (DOCX, ODT) |
 | base64_sha256 | string | no | | Expected SHA-256 of decoded `base64_content` for integrity checks |
 
-Provide one source (`content`, `file_path`, `file_url`, or `base64_content`). Without `source_format`, the `file_name` extension sets the format (e.g. `Notes.md` so Markdown tables convert); the extension is dropped from the title. Where local file access is disabled, `file_path` is replaced by `return_upload_url`, which returns a resumable-upload URL to PUT the bytes to (requires `source_format`).
+Either provide exactly one source (`content`, `file_path`, `file_url`, or `base64_content`), or set `return_upload_url=true` with `source_format` and no source. Without `source_format`, the `file_name` extension sets the format (e.g. `Notes.md` so Markdown tables convert); the extension is dropped from the title. `return_upload_url` is offered only where local file access is disabled (it replaces `file_path`) and returns a resumable-upload URL to PUT the bytes to.
 
 ### import_to_google_sheets
 Imports a spreadsheet (XLSX, XLS, ODS, CSV, TSV) into Google Sheets format with automatic conversion.
@@ -332,7 +332,7 @@ Imports a spreadsheet (XLSX, XLS, ODS, CSV, TSV) into Google Sheets format with 
 | base64_content | string | no | | Standard base64-encoded bytes for XLSX, XLS, or ODS |
 | base64_sha256 | string | no | | Expected SHA-256 of decoded `base64_content` for integrity checks |
 
-Source and `return_upload_url` rules match `import_to_google_doc`.
+Either provide exactly one source (`content`, `file_path`, `file_url`, or `base64_content`), or set `return_upload_url=true` with `source_format` and no source. Other rules match `import_to_google_doc`.
 
 ### import_to_google_slides
 Imports a presentation (PPTX, PPT, ODP) into Google Slides format with automatic conversion.
@@ -349,7 +349,7 @@ Imports a presentation (PPTX, PPT, ODP) into Google Slides format with automatic
 | base64_content | string | no | | Standard base64-encoded bytes for PPTX or ODP |
 | base64_sha256 | string | no | | Expected SHA-256 of decoded `base64_content` for integrity checks |
 
-No inline text `content`: presentations are binary, so pass `file_path`, `file_url`, or `base64_content`. `return_upload_url` rules match `import_to_google_doc`.
+No inline text `content`: presentations are binary. Either provide exactly one source (`file_path`, `file_url`, or `base64_content`), or set `return_upload_url=true` with `source_format` and no source. Other rules match `import_to_google_doc`.
 
 ---
 

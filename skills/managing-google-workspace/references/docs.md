@@ -31,6 +31,7 @@ Reads a Google Doc and returns it as Markdown, preserving headings, bold/italic/
 | include_resolved | boolean | no | false | Include resolved comments |
 | suggestions_view_mode | string | no | DEFAULT_FOR_CURRENT_ACCESS | `DEFAULT_FOR_CURRENT_ACCESS`, `SUGGESTIONS_INLINE`, `PREVIEW_SUGGESTIONS_ACCEPTED`, or `PREVIEW_WITHOUT_SUGGESTIONS` |
 | tab_id | string | no | | Render only this tab (no child tabs); overrides a URL `?tab=`. Pass `""` to read every tab of such a URL |
+| include_colors | boolean | no | false | Follow text with an explicit RGB foreground color with `[color: #rrggbb]`. Theme colors are not shown |
 
 ### get_doc_content
 Retrieves plain text content of a Google Doc or a Drive file (.docx, etc.). Native Google Docs use the Docs API; Office files are downloaded and text-extracted via Drive API.
