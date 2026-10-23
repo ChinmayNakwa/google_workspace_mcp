@@ -64,7 +64,7 @@ Content handling:
 - Office files (.docx/.xlsx/.pptx): parsed to extract readable text
 - PDFs: text extracted when possible; scanned PDFs return a download hint
 - Images (PNG, JPEG, GIF, WebP): metadata header as text, plus the image itself as MCP image content
-- SVG: returned as its markup (text), with embedded base64 images replaced by a size note
+- SVG: returned as its markup (text). Each PNG, JPEG, GIF or WebP image embedded as a base64 data URI is attached as image content, and its place in the markup reads `[embedded image N, … attached as image content]`. Other embedded payloads, such as fonts, are omitted, with a note giving their size
 - BMP, TIFF: returned as base64 text after the header
 - Other files: downloaded, UTF-8 decoded if possible
 

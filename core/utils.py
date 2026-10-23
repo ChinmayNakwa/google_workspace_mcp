@@ -1,4 +1,5 @@
 import base64
+import binascii
 import io
 import json
 import logging
@@ -14,7 +15,7 @@ import functools
 import inspect
 
 from pathlib import Path
-from typing import Annotated, Any, List, Optional, Union
+from typing import Annotated, Any, List, NamedTuple, Optional, Union
 
 from pydantic import BeforeValidator
 from defusedxml import DefusedXmlException, ElementTree as ET
@@ -1129,36 +1130,90 @@ def image_content_from_bytes(file_bytes: bytes, mime_type: str) -> ImageContent:
     )
 
 
-def svg_source_text(file_bytes: bytes) -> Optional[str]:
+def sniff_inline_image_mime_type(data: bytes) -> Optional[str]:
     """
-    Return an SVG's markup as text, with embedded base64 payloads elided.
+    Identify image bytes by their magic number, for the types in
+    INLINE_IMAGE_MIME_TYPES only.
+
+    A declared type, such as a data URI's, can be wrong, and an image block
+    whose bytes don't match its type can fail the whole model request.
+
+    Returns:
+        Optional[str]: The MIME type, or None if the bytes are not PNG, JPEG,
+        GIF or WebP.
+    """
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+class SvgContent(NamedTuple):
+    """An SVG read for a model: its markup, and the raster images it embeds."""
+
+    markup: str
+    images: List[ImageContent]
+
+
+def svg_content(file_bytes: bytes) -> Optional[SvgContent]:
+    """
+    Read an SVG as its markup, with embedded raster images pulled out as
+    image content.
 
     SVG is XML, so its labels and structure are readable as text, while model
     APIs reject it as an image block. Design tools often embed raster images
-    as base64 data URIs, which would put a long base64 string back into the
-    text result, so each payload is replaced by a short note giving its size.
+    and fonts as base64 data URIs, which would put a long base64 string back
+    into the text. So each payload is replaced by a short note:
+
+    - A PNG, JPEG, GIF or WebP payload (identified by its bytes, not the type
+      the URI declares) is decoded and attached as image content. Its note is
+      numbered to match its position in ``images``.
+    - Any other payload (fonts, BMP, TIFF, nested SVG, or base64 that doesn't
+      decode) is omitted, and its note gives its size.
+
+    Payloads shorter than _SVG_MIN_ELIDED_PAYLOAD characters are left in
+    place, since eliding them saves nothing.
 
     Args:
         file_bytes: The SVG file content as bytes.
 
     Returns:
-        Optional[str]: The markup, or None if the bytes are not UTF-8 text
-        (for example a gzip-compressed .svgz file).
+        Optional[SvgContent]: The markup and the attached images in document
+        order, or None if the bytes are not UTF-8 text (for example a
+        gzip-compressed .svgz file).
     """
     try:
         markup = file_bytes.decode("utf-8")
     except UnicodeDecodeError:
         return None
 
+    images: List[ImageContent] = []
+
     def _elide(match: re.Match) -> str:
         payload = re.sub(r"\s", "", match.group("payload"))
         if len(payload) < _SVG_MIN_ELIDED_PAYLOAD:
             return match.group(0)
-        size = len(payload) * 3 // 4 - payload.count("=")
-        mime = match.group("mime") or "data"
-        return f"data:{mime};base64,[{size} bytes of base64 omitted]"
+        declared = match.group("mime") or "data"
+        try:
+            data = base64.b64decode(payload, validate=True)
+        except (binascii.Error, ValueError):
+            size = len(payload) * 3 // 4 - payload.count("=")
+            return f"data:{declared};base64,[{size} bytes of invalid base64 omitted]"
+        mime_type = sniff_inline_image_mime_type(data)
+        if mime_type is None:
+            return f"data:{declared};base64,[{len(data)} bytes omitted]"
+        images.append(image_content_from_bytes(data, mime_type))
+        return (
+            f"data:{declared};base64,[embedded image {len(images)}, "
+            f"{len(data)} bytes, attached as image content]"
+        )
 
-    return _SVG_DATA_URI_RE.sub(_elide, markup)
+    return SvgContent(_SVG_DATA_URI_RE.sub(_elide, markup), images)
 
 
 _URL_QUERY_RE = re.compile(r"\?.*?(?=\s+returned(?:\s|$)|[>\"']|$)")

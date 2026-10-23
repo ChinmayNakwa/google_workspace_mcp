@@ -14,7 +14,8 @@ from core.utils import (
     encode_image_content,
     extract_pdf_text,
     image_content_from_bytes,
-    svg_source_text,
+    sniff_inline_image_mime_type,
+    svg_content,
 )
 
 
@@ -121,8 +122,51 @@ def test_inline_image_mime_types_is_model_api_allowlist():
 
 
 # ---------------------------------------------------------------------------
-# svg_source_text
+# sniff_inline_image_mime_type and svg_content
 # ---------------------------------------------------------------------------
+
+PNG = b"\x89PNG\r\n\x1a\n" + bytes(range(200))
+JPEG = b"\xff\xd8\xff\xe0" + bytes(range(200))
+GIF = b"GIF89a" + bytes(range(200))
+WEBP = b"RIFF\x00\x00\x00\x00WEBPVP8 " + bytes(range(200))
+FONT = b"wOF2" + bytes(range(200))
+
+
+def _b64(data):
+    return base64.b64encode(data).decode("ascii")
+
+
+@pytest.mark.parametrize(
+    "data, expected",
+    [
+        (PNG, "image/png"),
+        (JPEG, "image/jpeg"),
+        (GIF, "image/gif"),
+        (b"GIF87a" + bytes(10), "image/gif"),
+        (WEBP, "image/webp"),
+        (b"BM" + bytes(64), None),
+        (b"II*\x00" + bytes(64), None),
+        (b"<svg></svg>", None),
+        (FONT, None),
+        (b"RIFF\x00\x00\x00\x00WAVE", None),
+        (b"", None),
+    ],
+    ids=[
+        "png",
+        "jpeg",
+        "gif89a",
+        "gif87a",
+        "webp",
+        "bmp",
+        "tiff",
+        "svg",
+        "font",
+        "riff-wav",
+        "empty",
+    ],
+)
+def test_sniff_inline_image_mime_type(data, expected):
+    assert sniff_inline_image_mime_type(data) == expected
 
 
 def test_svg_mime_type_is_not_inline():
@@ -130,72 +174,128 @@ def test_svg_mime_type_is_not_inline():
     assert SVG_MIME_TYPE not in INLINE_IMAGE_MIME_TYPES
 
 
-def test_svg_source_text_returns_markup_unchanged():
+def test_svg_content_returns_markup_unchanged():
     svg = '<svg xmlns="http://www.w3.org/2000/svg"><text>Ünïcode ✓</text></svg>'
-    assert svg_source_text(svg.encode("utf-8")) == svg
+    result = svg_content(svg.encode("utf-8"))
+    assert result.markup == svg
+    assert result.images == []
 
 
-def test_svg_source_text_elides_each_base64_data_uri():
-    png = b"\x89PNG" + b"\x00" * 100
-    jpeg = b"\xff\xd8\xff" + b"\x01" * 50
+def test_svg_content_attaches_embedded_images_in_order():
     svg = (
-        f'<svg><image href="data:image/png;base64,{base64.b64encode(png).decode()}"/>'
-        f"<image xlink:href='data:image/jpeg;base64,{base64.b64encode(jpeg).decode()}'/>"
-        "</svg>"
+        f'<svg><image href="data:image/png;base64,{_b64(PNG)}"/>'
+        f"<image xlink:href='data:image/jpeg;base64,{_b64(JPEG)}'/>"
+        f'<image href="data:image/webp;base64,{_b64(WEBP)}"/></svg>'
     )
-    assert svg_source_text(svg.encode()) == (
-        f'<svg><image href="data:image/png;base64,[{len(png)} bytes of base64 omitted]"/>'
-        f"<image xlink:href='data:image/jpeg;base64,[{len(jpeg)} bytes of base64 omitted]'/>"
-        "</svg>"
+    result = svg_content(svg.encode())
+    assert result.markup == (
+        f'<svg><image href="data:image/png;base64,[embedded image 1, {len(PNG)} bytes, attached as image content]"/>'
+        f"<image xlink:href='data:image/jpeg;base64,[embedded image 2, {len(JPEG)} bytes, attached as image content]'/>"
+        f'<image href="data:image/webp;base64,[embedded image 3, {len(WEBP)} bytes, attached as image content]"/></svg>'
+    )
+    assert [image.mime_type for image in result.images] == [
+        "image/png",
+        "image/jpeg",
+        "image/webp",
+    ]
+    assert [base64.b64decode(image.data) for image in result.images] == [
+        PNG,
+        JPEG,
+        WEBP,
+    ]
+
+
+def test_svg_content_attaches_every_embedded_image():
+    """No cap: an SVG with many embedded images attaches all of them."""
+    svg = (
+        "<svg>"
+        + "".join(
+            f'<image href="data:image/png;base64,{_b64(PNG + bytes([i]))}"/>'
+            for i in range(25)
+        )
+        + "</svg>"
+    )
+    result = svg_content(svg.encode())
+    assert len(result.images) == 25
+    assert "[embedded image 25, " in result.markup
+
+
+def test_svg_content_sniffs_type_instead_of_trusting_the_uri():
+    """A JPEG labelled image/png is attached as image/jpeg."""
+    svg = f'<image href="data:image/png;base64,{_b64(JPEG)}"/>'
+    result = svg_content(svg.encode())
+    assert [image.mime_type for image in result.images] == ["image/jpeg"]
+    assert result.markup == (
+        f'<image href="data:image/png;base64,[embedded image 1, {len(JPEG)} bytes, attached as image content]"/>'
     )
 
 
-def test_svg_source_text_elides_whitespace_wrapped_payload():
+def test_svg_content_omits_payloads_that_are_not_attachable_images():
+    """Fonts, BMP, and anything labelled as an image that isn't one are omitted."""
+    bmp = b"BM" + bytes(range(200))
+    svg = (
+        f"<style>@font-face{{src:url(data:font/woff2;charset=utf-8;base64,{_b64(FONT)})}}</style>"
+        f'<image href="data:image/bmp;base64,{_b64(bmp)}"/>'
+        f'<image href="data:image/png;base64,{_b64(FONT)}"/>'
+        f'<image href="data:;base64,{_b64(FONT)}"/>'
+    )
+    result = svg_content(svg.encode())
+    assert result.images == []
+    assert result.markup == (
+        f"<style>@font-face{{src:url(data:font/woff2;base64,[{len(FONT)} bytes omitted])}}</style>"
+        f'<image href="data:image/bmp;base64,[{len(bmp)} bytes omitted]"/>'
+        f'<image href="data:image/png;base64,[{len(FONT)} bytes omitted]"/>'
+        f'<image href="data:data;base64,[{len(FONT)} bytes omitted]"/>'
+    )
+
+
+def test_svg_content_omits_invalid_base64():
+    """Malformed padding fails to decode, so nothing is attached."""
+    payload = "A" * 70 + "=A"
+    svg = f'<image href="data:image/png;base64,{payload}"/>'
+    result = svg_content(svg.encode())
+    assert result.images == []
+    assert "invalid base64 omitted" in result.markup
+    assert payload not in result.markup
+
+
+def test_svg_content_decodes_whitespace_wrapped_payload():
     """SVG tools often wrap long base64 payloads across lines."""
-    raw = bytes(range(256))
-    encoded = base64.b64encode(raw).decode()
+    encoded = _b64(PNG)
     wrapped = "\n".join(encoded[i : i + 76] for i in range(0, len(encoded), 76))
     svg = f'<svg><image href="data:image/png;base64,{wrapped}"/></svg>'
-    assert svg_source_text(svg.encode()) == (
-        f'<svg><image href="data:image/png;base64,[{len(raw)} bytes of base64 omitted]"/></svg>'
+    result = svg_content(svg.encode())
+    assert [base64.b64decode(image.data) for image in result.images] == [PNG]
+    assert result.markup == (
+        f'<svg><image href="data:image/png;base64,[embedded image 1, {len(PNG)} bytes, attached as image content]"/></svg>'
     )
 
 
-def test_svg_source_text_elides_uri_with_parameters_or_no_mime():
-    raw = b"font-bytes" * 10
-    encoded = base64.b64encode(raw).decode()
-    svg = (
-        f"<style>@font-face{{src:url(data:font/woff2;charset=utf-8;base64,{encoded})}}</style>"
-        f'<image href="data:;base64,{encoded}"/>'
-    )
-    assert svg_source_text(svg.encode()) == (
-        f"<style>@font-face{{src:url(data:font/woff2;base64,[{len(raw)} bytes of base64 omitted])}}</style>"
-        f'<image href="data:data;base64,[{len(raw)} bytes of base64 omitted]"/>'
-    )
-
-
-def test_svg_source_text_leaves_non_base64_data_uris():
+def test_svg_content_leaves_non_base64_data_uris():
     """Percent-encoded data URIs are already text, so they are kept."""
     svg = '<svg><image href="data:image/svg+xml,%3Csvg%3E%3C/svg%3E"/></svg>'
-    assert svg_source_text(svg.encode()) == svg
+    result = svg_content(svg.encode())
+    assert result.markup == svg
+    assert result.images == []
 
 
-def test_svg_source_text_returns_none_for_non_utf8():
-    assert svg_source_text(b"\x1f\x8b\x08\x00\xff\xfe") is None
+def test_svg_content_returns_none_for_non_utf8():
+    assert svg_content(b"\x1f\x8b\x08\x00\xff\xfe") is None
 
 
-def test_svg_source_text_keeps_short_payloads():
+def test_svg_content_keeps_short_payloads():
     """Eliding a tiny payload would make the text longer, not shorter."""
     svg = '<svg><image href="data:image/png;base64,QUJD"/></svg>'
-    assert svg_source_text(svg.encode()) == svg
+    result = svg_content(svg.encode())
+    assert result.markup == svg
+    assert result.images == []
 
 
-def test_svg_source_text_does_not_consume_following_text():
+def test_svg_content_does_not_consume_following_text():
     """The match stops at the end of the payload, not at the next whitespace run."""
-    raw = bytes(range(128))
-    encoded = base64.b64encode(raw).decode()
-    svg = f'<image href="data:image/png;base64,{encoded}"/> \n <text>Next</text>'
-    assert svg_source_text(svg.encode()) == (
-        f'<image href="data:image/png;base64,[{len(raw)} bytes of base64 omitted]"/>'
+    svg = f'<image href="data:image/png;base64,{_b64(PNG)}"/> \n <text>Next</text>'
+    result = svg_content(svg.encode())
+    assert result.markup == (
+        f'<image href="data:image/png;base64,[embedded image 1, {len(PNG)} bytes, attached as image content]"/>'
         " \n <text>Next</text>"
     )

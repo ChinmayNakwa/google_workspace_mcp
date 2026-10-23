@@ -299,23 +299,58 @@ async def test_get_drive_file_content_svg_returns_markup(mock_resolve_image):
 
 
 @pytest.mark.asyncio
-async def test_get_drive_file_content_svg_elides_embedded_base64(mock_resolve_image):
-    """An embedded raster image does not put its base64 back into the text."""
+async def test_get_drive_file_content_svg_attaches_embedded_images(mock_resolve_image):
+    """Embedded raster images come back as image content after the markup, in
+    document order; a font is omitted. No base64 stays in the text."""
     png = b"\x89PNG\r\n\x1a\n" + bytes(range(256)) * 40
-    payload = base64.b64encode(png).decode("ascii")
+    jpeg = b"\xff\xd8\xff\xe0" + bytes(range(256)) * 10
+    font = b"wOF2" + bytes(range(256))
+    payloads = [base64.b64encode(b).decode("ascii") for b in (png, font, jpeg)]
     svg = (
         '<svg xmlns="http://www.w3.org/2000/svg">'
-        f'<image href="data:image/png;base64,{payload}"/>'
+        f'<image href="data:image/png;base64,{payloads[0]}"/>'
+        f"<style>@font-face{{src:url(data:font/woff2;base64,{payloads[1]})}}</style>"
+        f'<image href="data:image/jpeg;base64,{payloads[2]}"/>'
         "<text>Logo</text></svg>"
     )
 
     result = await _get_svg(mock_resolve_image, svg.encode("utf-8"))
 
-    assert payload not in result
-    assert result == _SVG_HEADER + (
+    assert isinstance(result, ToolResult)
+    text_block, *image_blocks = result.content
+    assert text_block.text == _SVG_HEADER + (
         '<svg xmlns="http://www.w3.org/2000/svg">'
-        f'<image href="data:image/png;base64,[{len(png)} bytes of base64 omitted]"/>'
+        f'<image href="data:image/png;base64,[embedded image 1, {len(png)} bytes, attached as image content]"/>'
+        f"<style>@font-face{{src:url(data:font/woff2;base64,[{len(font)} bytes omitted])}}</style>"
+        f'<image href="data:image/jpeg;base64,[embedded image 2, {len(jpeg)} bytes, attached as image content]"/>'
         "<text>Logo</text></svg>"
+    )
+    for payload in payloads:
+        assert payload not in text_block.text
+    assert [(b.mime_type, base64.b64decode(b.data)) for b in image_blocks] == [
+        ("image/png", png),
+        ("image/jpeg", jpeg),
+    ]
+    assert result.structured_content == {"result": text_block.text}
+
+
+@pytest.mark.asyncio
+async def test_get_drive_file_content_svg_without_images_is_plain_string(
+    mock_resolve_image,
+):
+    """An SVG whose only embedded payload is a font still returns a plain string."""
+    font = b"wOF2" + bytes(range(256))
+    svg = (
+        "<svg><style>@font-face{src:url(data:font/woff2;base64,"
+        + base64.b64encode(font).decode("ascii")
+        + ")}</style></svg>"
+    )
+
+    result = await _get_svg(mock_resolve_image, svg.encode("utf-8"))
+
+    assert result == _SVG_HEADER + (
+        "<svg><style>@font-face{src:url(data:font/woff2;base64,"
+        f"[{len(font)} bytes omitted])}}</style></svg>"
     )
 
 

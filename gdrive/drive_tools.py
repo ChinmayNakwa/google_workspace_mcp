@@ -47,7 +47,7 @@ from core.utils import (
     local_file_access_enabled,
     encode_image_content,
     image_content_from_bytes,
-    svg_source_text,
+    svg_content,
     OfficeXmlExtractionError,
     OfficeXmlTooLargeError,
     UserInputError,
@@ -340,8 +340,9 @@ async def get_drive_file_content(
     • PDFs → text extracted with pypdf when possible; scanned/image-only PDFs
       fall back to a download hint.
     • Images (PNG, JPEG, GIF, WebP) → returned as MCP image content after the
-      metadata header. SVG → returned as its markup, with embedded base64
-      images elided. BMP and TIFF → still returned as base64 text.
+      metadata header. SVG → returned as its markup; raster images it embeds
+      as base64 are attached as image content, numbered to match their place
+      in the markup. BMP and TIFF → still returned as base64 text.
     • Any other file → downloaded; tries UTF-8 decode, else notes binary.
 
     Args:
@@ -399,7 +400,7 @@ async def get_drive_file_content(
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     }
 
-    image_content: Optional[ImageContent] = None
+    images: List[ImageContent] = []
     if mime_type in office_mime_types:
         # Offload Office XML extraction to a thread to avoid blocking the event loop
         try:
@@ -437,14 +438,15 @@ async def get_drive_file_content(
                 f"Use get_drive_file_download_url to get a direct download link instead.]"
             )
     elif mime_type in INLINE_IMAGE_MIME_TYPES:
-        image_content = image_content_from_bytes(file_content_bytes, mime_type)
+        images.append(image_content_from_bytes(file_content_bytes, mime_type))
         body_text = (
             f"[Image attached as image content - {len(file_content_bytes)} bytes]"
         )
     elif mime_type == SVG_MIME_TYPE:
-        svg_text = svg_source_text(file_content_bytes)
-        if svg_text is not None:
-            body_text = svg_text
+        svg = svg_content(file_content_bytes)
+        if svg is not None:
+            body_text = svg.markup
+            images.extend(svg.images)
         else:
             body_text = (
                 f"[SVG is not UTF-8 text (it may be a compressed .svgz) - "
@@ -468,12 +470,12 @@ async def get_drive_file_content(
         f'File: "{file_name}" (ID: {file_id}, Type: {mime_type})\n'
         f"Link: {web_view_link}\n\n--- CONTENT ---\n"
     )
-    if image_content is not None:
+    if images:
         # structured_content mirrors the plain-string result so clients that
         # validate against the tool's output schema still get a string.
         text = header + body_text
         return ToolResult(
-            content=[TextContent(type="text", text=text), image_content],
+            content=[TextContent(type="text", text=text), *images],
             structured_content={"result": text},
         )
     return header + body_text
