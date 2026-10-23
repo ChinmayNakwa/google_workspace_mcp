@@ -982,8 +982,11 @@ class TestRenderPageToImage:
         )
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("size", ["SMALL", "MEDIUM", "LARGE", "WIDTH2000_PX"])
-    async def test_each_valid_size_is_passed_to_the_api(self, monkeypatch, size):
+    @pytest.mark.parametrize(
+        "size, width",
+        [("SMALL", 200), ("MEDIUM", 800), ("LARGE", 1600), ("WIDTH2000_PX", 2000)],
+    )
+    async def test_each_valid_size_is_passed_to_the_api(self, monkeypatch, size, width):
         self._mock_fetch(monkeypatch, self._png_handler())
         service = self._service()
         out = await _unwrap(slides_tools.render_page_to_image)(
@@ -998,7 +1001,7 @@ class TestRenderPageToImage:
             thumbnailProperties_thumbnailSize=size,
             thumbnailProperties_mimeType="PNG",
         )
-        assert size in out.content[0].text
+        assert f"{size} ({width}px wide)" in out.content[0].text
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("size", ["HUGE", "medium", ""])
@@ -1020,6 +1023,9 @@ class TestRenderPageToImage:
             httpx.Response(403),
             httpx.Response(
                 200, content=b"<html>", headers={"content-type": "text/html"}
+            ),
+            httpx.Response(
+                200, content=b"<svg/>", headers={"content-type": "image/svg+xml"}
             ),
             httpx.ConnectError("unreachable"),
         ],

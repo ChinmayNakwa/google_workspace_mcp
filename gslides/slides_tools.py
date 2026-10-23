@@ -5,7 +5,6 @@ This module provides MCP tools for interacting with Google Slides API.
 """
 
 import asyncio
-import base64
 import json
 import logging
 from typing import Any, Dict, Iterator, List, Optional, Tuple
@@ -16,7 +15,11 @@ from mcp.types import ImageContent, TextContent, ToolAnnotations
 
 from auth.service_decorator import require_google_service
 from core.server import server
-from core.utils import handle_http_errors
+from core.utils import (
+    handle_http_errors,
+    image_content_from_bytes,
+    sniff_inline_image_mime_type,
+)
 from core.comments import create_comment_tools
 from gslides.slides_helpers import (
     validate_batch_update_requests,
@@ -825,15 +828,11 @@ async def _fetch_page_image(url: str) -> Optional[ImageContent]:
             f"[render_page_to_image] Image fetch failed: {type(exc).__name__}"
         )
         return None
-    mime_type = response.headers.get("content-type", "").split(";")[0].strip()
-    if not mime_type.startswith("image/"):
+    mime_type = sniff_inline_image_mime_type(response.content)
+    if mime_type is None:
         logger.warning("[render_page_to_image] Image fetch returned a non-image")
         return None
-    return ImageContent(
-        type="image",
-        data=base64.b64encode(response.content).decode("ascii"),
-        mimeType=mime_type,
-    )
+    return image_content_from_bytes(response.content, mime_type)
 
 
 @server.tool(
@@ -905,8 +904,6 @@ async def render_page_to_image(
 
     image = await _fetch_page_image(image_url) if image_url else None
     if image is None:
-        # The URL may still be reachable by the caller, so a failed fetch
-        # degrades to the text result instead of failing the call.
         text += "\n\nImage unavailable: the rendered page could not be fetched."
         if image_url:
             text += " Open the image URL above instead, before it expires."
@@ -914,9 +911,7 @@ async def render_page_to_image(
     if image is not None:
         content.append(image)
     logger.info(f"Page rendered for {user_google_email}")
-    # The `str` annotation keeps the advertised output schema ({"result":
-    # string}), and structured_content mirrors the text so clients that
-    # validate against that schema still get what they expect.
+    # structured_content mirrors the text to satisfy the `str` output schema.
     return ToolResult(content=content, structured_content={"result": text})
 
 

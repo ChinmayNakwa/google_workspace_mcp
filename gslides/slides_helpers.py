@@ -74,9 +74,7 @@ _SLIDES_BATCH_REQUEST_EXAMPLES = (
 )
 
 
-# getThumbnail's thumbnailProperties.thumbnailSize values and the image width
-# each one renders at. WIDTH2000_PX is in the API's discovery document even
-# though the public reference only lists the other three.
+# getThumbnail thumbnailSize values and the pixel width each renders at.
 PAGE_IMAGE_WIDTHS = {
     "SMALL": 200,
     "MEDIUM": 800,
