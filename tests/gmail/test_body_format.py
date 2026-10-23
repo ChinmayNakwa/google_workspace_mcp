@@ -198,6 +198,27 @@ class TestSignatureHtmlToText:
 
         assert _signature_html_to_text(signature) == "Acme Corporation\nEngineering"
 
+    def test_separates_adjacent_table_cells(self):
+        signature = (
+            '<table><tr><td><a href="mailto:j@example.com">j@example.com</a></td>'
+            '<td><a href="https://cal.example.com">Book a call</a></td></tr></table>'
+        )
+
+        assert _signature_html_to_text(signature) == "j@example.com Book a call"
+
+    def test_cell_separator_adds_no_extra_whitespace(self):
+        signature = (
+            "<table><tr><td>Jane<br></td></tr>"
+            "<tr><td>Founder</td><td></td><td>Example </td></tr></table>"
+        )
+
+        assert _signature_html_to_text(signature) == "Jane\nFounder Example"
+
+    def test_separates_cells_with_omitted_end_tags(self):
+        signature = "<table><tr><th>Name<th>Title<tr><td>Jane<td>Founder</table>"
+
+        assert _signature_html_to_text(signature) == "Name Title\nJane Founder"
+
 
 class TestHtmlPlainTextAlternative:
     """The text/plain alternative of an outgoing HTML message is what non-HTML

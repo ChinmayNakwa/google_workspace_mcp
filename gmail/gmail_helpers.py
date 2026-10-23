@@ -681,7 +681,7 @@ class _HTMLBlockTextExtractor(HTMLParser):
 
     # Elements whose boundaries are visible line breaks once the markup is
     # gone. Table cells are deliberately absent: a line per cell would wreck
-    # table-based layouts, and the separator they do need is its own issue.
+    # table-based layouts, so handle_starttag separates them with a space.
     _BLOCK_TAGS = frozenset(
         {
             "address",
@@ -747,6 +747,10 @@ class _HTMLBlockTextExtractor(HTMLParser):
             # A nested block starts a new visual line even when its parent
             # already contains text (for example, Name<div>Title</div>).
             self._append_line_break()
+        elif tag in ("td", "th"):
+            # Separating at the start tag also covers omitted </td> and </th>.
+            if self._text and not self._text[-1].endswith((" ", "\n")):
+                self._text.append(" ")
 
     def handle_endtag(self, tag):
         # Closing a block ends its visual line. _append_line_break avoids a
