@@ -7,7 +7,7 @@ This module provides MCP tools for interacting with Google Contacts via the Peop
 import asyncio
 import logging
 import warnings
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional
 
 from googleapiclient.errors import HttpError
 from mcp import Resource
@@ -563,7 +563,6 @@ async def _warmup_search_cache(service: Resource, user_google_email: str) -> Non
 
 @server.tool(
     title="List Contacts",
-    output_schema=None,
     annotations=ToolAnnotations(
         readOnlyHint=True,
         destructiveHint=False,
@@ -581,29 +580,20 @@ async def list_contacts(
     sort_order: Optional[str] = None,
     request_sync_token: bool = False,
     sync_token: Optional[str] = None,
-) -> Union[str, Dict[str, Any]]:
+) -> str:
     """
-    List contacts as text, or return one structured full/incremental sync page.
+    List contacts for the authenticated user, optionally as a full or incremental sync.
 
     Args:
         user_google_email (str): The user's Google email address. Required.
         page_size (int): Maximum number of contacts to return (default: 100, max: 1000).
-        page_token (Optional[str]): Token for pagination.
-        sort_order (Optional[str]): Sort order: "LAST_MODIFIED_ASCENDING", "LAST_MODIFIED_DESCENDING", "FIRST_NAME_ASCENDING", or "LAST_NAME_ASCENDING".
-            Not supported in sync mode.
-        request_sync_token (bool): Start a full sync with True; keep True on every
-            page until next_sync_token is returned. Enables structured output.
-        sync_token (Optional[str]): Return changes since a previous sync, including
-            metadata.deleted tombstones. Implies structured output and requests a
-            fresh sync token. Reuse the same page_size and original sync_token on
-            all continuation pages. Tokens expire after seven days.
+        page_token (Optional[str]): Token for pagination. Keep all other arguments unchanged when following it.
+        sort_order (Optional[str]): Sort order: "LAST_MODIFIED_ASCENDING", "LAST_MODIFIED_DESCENDING", "FIRST_NAME_ASCENDING", or "LAST_NAME_ASCENDING". Not supported when syncing.
+        request_sync_token (bool): Start a full sync. The last page returns a sync token.
+        sync_token (Optional[str]): List only changes since the sync that returned this token, marking deleted contacts. The last page returns a new sync token.
 
     Returns:
-        str: Existing text listing when neither sync option is used.
-        Dict: In sync mode, account, raw People API contacts (including email/phone
-            arrays and metadata), effective page_size, next_page_token,
-            next_sync_token, and reset_required. Persist tokens in the client only
-            after the last page. On reset_required, restart a full sync.
+        str: List of contacts with their basic information.
     """
     return await _list_contacts(
         service,

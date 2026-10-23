@@ -10,7 +10,7 @@ import asyncio
 import datetime
 import logging
 import re
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 from googleapiclient.errors import HttpError
 
@@ -26,40 +26,39 @@ def _is_expired_sync_token(exc: HttpError) -> bool:
     status = getattr(exc.resp, "status", None)
     if status == 410:
         return True
-    if status != 400:
-        return False
-    # HttpError parses Google's error.details. Match the structured reason,
-    # rather than a substring in an unrelated error's free-text message.
     details = getattr(exc, "error_details", None)
-    return isinstance(details, list) and any(
-        isinstance(detail, dict) and detail.get("reason") == "EXPIRED_SYNC_TOKEN"
-        for detail in details
+    return (
+        status == 400
+        and isinstance(details, list)
+        and any(
+            isinstance(detail, dict) and detail.get("reason") == "EXPIRED_SYNC_TOKEN"
+            for detail in details
+        )
     )
 
 
 async def _list_contacts(
     service: Any,
     user_google_email: str,
-    page_size: int = 100,
-    page_token: Optional[str] = None,
-    sort_order: Optional[str] = None,
-    request_sync_token: bool = False,
-    sync_token: Optional[str] = None,
-) -> Union[str, Dict[str, Any]]:
-    """Fetch one contacts page, preserving the text listing unless sync is requested."""
+    page_size: int,
+    page_token: Optional[str],
+    sort_order: Optional[str],
+    request_sync_token: bool,
+    sync_token: Optional[str],
+) -> str:
+    """List one page of contacts, ending the last sync page with a sync token."""
     if page_size < 1:
         raise UserInputError("page_size must be >= 1")
-    page_size = min(page_size, 1000)
-    syncing = request_sync_token or sync_token is not None
     if sync_token is not None and not sync_token.strip():
         raise UserInputError("sync_token must not be empty")
-    if syncing and sort_order is not None:
+    syncing = request_sync_token or sync_token is not None
+    if syncing and sort_order:
         raise UserInputError("sort_order is not supported when syncing contacts")
 
     params: Dict[str, Any] = {
         "resourceName": "people/me",
         "personFields": DEFAULT_PERSON_FIELDS,
-        "pageSize": page_size,
+        "pageSize": min(page_size, 1000),
     }
     if page_token:
         params["pageToken"] = page_token
@@ -68,47 +67,32 @@ async def _list_contacts(
     if syncing:
         params["personFields"] += ",metadata"
         params["requestSyncToken"] = True
-        if sync_token is not None:
-            params["syncToken"] = sync_token
+    if sync_token:
+        params["syncToken"] = sync_token
 
-    page: Dict[str, Any] = {
-        "account": user_google_email,
-        "contacts": [],
-        "page_size": page_size,
-        "next_page_token": None,
-        "next_sync_token": None,
-        "reset_required": False,
-    }
     try:
         result = await asyncio.to_thread(
             service.people().connections().list(**params).execute
         )
     except HttpError as exc:
-        if sync_token is not None and _is_expired_sync_token(exc):
-            page["reset_required"] = True
-            return page
+        if sync_token and _is_expired_sync_token(exc):
+            return "Sync token expired. Start a new full sync with request_sync_token=true."
         raise
 
     connections = result.get("connections", [])
-    logger.info("[list_contacts] Returned %d contacts", len(connections))
-    if syncing:
-        page.update(
-            contacts=connections,
-            next_page_token=result.get("nextPageToken"),
-            next_sync_token=result.get("nextSyncToken"),
-        )
-        return page
-
-    if not connections:
+    if connections:
+        total_people = result.get("totalPeople", len(connections))
+        response = f"Contacts for {user_google_email} ({len(connections)} of {total_people}):\n\n"
+        response += "".join(f"{_format_contact(person)}\n\n" for person in connections)
+    elif syncing:
+        response = f"No contacts returned for {user_google_email}.\n\n"
+    else:
         return f"No contacts found for {user_google_email}."
-    total_people = result.get("totalPeople", len(connections))
-    response = (
-        f"Contacts for {user_google_email} ({len(connections)} of {total_people}):\n\n"
-    )
-    for person in connections:
-        response += _format_contact(person) + "\n\n"
+
     if result.get("nextPageToken"):
         response += f"Next page token: {result['nextPageToken']}"
+    if result.get("nextSyncToken"):
+        response += f"Next sync token: {result['nextSyncToken']}"
     return response
 
 
@@ -245,6 +229,8 @@ def _format_contact(person: Dict[str, Any], detailed: bool = False) -> str:
     contact_id = resource_name.replace("people/", "") if resource_name else "Unknown"
 
     lines = [f"Contact ID: {contact_id}"]
+    if person.get("metadata", {}).get("deleted"):
+        lines.append("Deleted: yes")
 
     # Names
     names = person.get("names", [])
