@@ -22,6 +22,7 @@ from markdown_it import MarkdownIt
 
 from gdocs.docs_helpers import (
     create_delete_bullet_list_request,
+    create_delete_range_request,
     create_insert_text_request,
 )
 
@@ -530,17 +531,10 @@ def build_markdown_insert_requests(
     split_paragraph: bool = False,
     drop_bullet: bool = False,
 ) -> list[dict]:
-    """Build requests that insert rendered markdown at ``insert_at``.
+    """Build requests inserting markdown at ``insert_at``; [] if it renders empty.
 
-    ``split_paragraph`` - ``insert_at`` sits inside an existing paragraph (for
-    example just before the body's final newline), so a newline is inserted
-    first and the markdown starts in the new paragraph at ``insert_at + 1``.
-    Without it, paragraph styles emitted for the markdown would also restyle
-    the paragraph being split.
-    ``drop_bullet`` - the paragraph the markdown lands in carries a list
-    bullet; remove it so the first rendered paragraph does not inherit it.
-
-    Returns an empty list when the markdown renders to nothing.
+    ``split_paragraph`` opens a new paragraph when ``insert_at`` is mid-paragraph;
+    ``drop_bullet`` stops the first rendered paragraph inheriting a bullet.
     """
     content_start = insert_at + 1 if split_paragraph else insert_at
     markdown_requests = markdown_to_docs_requests(
@@ -558,3 +552,34 @@ def build_markdown_insert_requests(
         )
     requests.extend(markdown_requests)
     return requests
+
+
+def build_section_markdown_requests(
+    section: dict,
+    markdown_text: str,
+    append: bool,
+    tab_id: Optional[str] = None,
+) -> list[dict]:
+    """Build requests replacing, or appending to, a heading section with markdown."""
+    body_start, section_end = section["body_start"], section["section_end"]
+    last_paragraph = section["last_paragraph"]
+    at_body_end = section_end == last_paragraph["endIndex"] - 1
+    bulleted = "bullet" in last_paragraph.get("paragraph", {})
+    if append or section_end <= body_start:
+        split = at_body_end and last_paragraph["startIndex"] < section_end
+        return build_markdown_insert_requests(
+            markdown_text,
+            section_end,
+            tab_id,
+            split_paragraph=split,
+            drop_bullet=split and bulleted,
+        )
+    insert_requests = build_markdown_insert_requests(
+        markdown_text, body_start, tab_id, drop_bullet=at_body_end and bulleted
+    )
+    if not insert_requests:
+        return []
+    return [
+        create_delete_range_request(body_start, section_end, tab_id),
+        *insert_requests,
+    ]

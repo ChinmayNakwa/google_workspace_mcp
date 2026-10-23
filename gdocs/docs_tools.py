@@ -75,6 +75,7 @@ from gdocs.docs_markdown import (
 )
 from gdocs.docs_markdown_writer import (
     build_markdown_insert_requests,
+    build_section_markdown_requests,
     markdown_to_docs_requests,
 )
 from gdocs.docs_plain_text import render_doc_to_plain_text
@@ -618,16 +619,10 @@ async def _modify_doc_text_by_heading(
     formatting_params: list,
     validator: ValidationManager,
 ) -> str:
-    """Heading-addressed branch of modify_doc_text.
-
-    Resolves the section under ``heading`` via ``find_heading_section`` and
-    then either replaces its body with rendered markdown, appends rendered
-    markdown to it (``end_of_segment``), or applies character formatting to
-    the whole body. One batchUpdate, guarded by ``writeControl`` so a
-    concurrent edit between the read and the write fails cleanly instead of
-    landing at stale indices.
-    """
+    """Replace, append to, or format the section under ``heading`` in one guarded write."""
     has_formatting = any(p is not None for p in formatting_params)
+    if not heading.strip():
+        return "Error: 'heading' must not be empty."
     if start_index is not None or end_index is not None:
         return "Error: 'start_index'/'end_index' cannot be combined with 'heading'; the section range is resolved from the heading."
     if segment_id is not None:
@@ -649,20 +644,17 @@ async def _modify_doc_text_by_heading(
         service.documents().get(documentId=document_id, includeTabsContent=True).execute
     )
     section = find_heading_section(doc, heading, heading_level, tab_id)
-    body_start = section["body_start"]
-    section_end = section["section_end"]
-    last_paragraph = section["last_paragraph"]
+    body_start, section_end = section["body_start"], section["section_end"]
     body_is_empty = section_end <= body_start
 
-    requests: list[dict] = []
     if text is None:
         if body_is_empty:
             return f"Error: The section under heading {heading!r} has no content to format."
-        requests.append(
+        requests = [
             create_format_text_request(
                 body_start, section_end, *formatting_params, tab_id, None
             )
-        )
+        ]
         operation = f"Applied formatting to section {body_start}-{section_end} under heading {heading!r}"
     else:
         if not end_of_segment and section["footnote_refs"]:
@@ -671,53 +663,13 @@ async def _modify_doc_text_by_heading(
                 f"{section['footnote_refs']} footnote reference(s); replacing it would "
                 "detach them. Use end_of_segment=true to append, or edit by index."
             )
-        if end_of_segment or body_is_empty:
-            insert_at = section_end
-            # The insert lands mid-paragraph only when the section ends at the
-            # body's final newline (inside the last paragraph) rather than at
-            # the start of the next heading paragraph.
-            inside_last = (
-                int(last_paragraph.get("startIndex", insert_at))
-                < insert_at
-                == int(last_paragraph.get("endIndex", 0)) - 1
-            )
-            split_paragraph = inside_last
-            drop_bullet = inside_last and "bullet" in last_paragraph.get(
-                "paragraph", {}
-            )
-            chars_deleted = 0
-        else:
-            # Delete the body, then insert at body_start. After the delete the
-            # paragraph at body_start is either the next heading or the
-            # section's surviving final newline; both start exactly there, so
-            # no split is needed, but a surviving list paragraph keeps its bullet.
-            requests.append(
-                create_delete_range_request(body_start, section_end, tab_id)
-            )
-            insert_at = body_start
-            split_paragraph = False
-            drop_bullet = "bullet" in last_paragraph.get("paragraph", {}) and (
-                int(last_paragraph.get("endIndex", 0)) - 1 == section_end
-            )
-            chars_deleted = section_end - body_start
-        insert_requests = build_markdown_insert_requests(
-            text,
-            insert_at,
-            tab_id=tab_id,
-            split_paragraph=split_paragraph,
-            drop_bullet=drop_bullet,
+        requests = build_section_markdown_requests(
+            section, text, end_of_segment, tab_id
         )
-        if not insert_requests:
+        if not requests:
             return "Error: 'text' rendered to no content; nothing to insert."
-        requests.extend(insert_requests)
-        inserted = sum(
-            len(r["insertText"]["text"]) for r in insert_requests if "insertText" in r
-        )
-        verb = "Appended to" if (end_of_segment or body_is_empty) else "Replaced"
-        operation = (
-            f"{verb} section under heading {heading!r} "
-            f"(deleted {chars_deleted} characters, inserted {inserted} characters)"
-        )
+        verb = "Appended to" if end_of_segment or body_is_empty else "Replaced"
+        operation = f"{verb} section under heading {heading!r}"
 
     body: dict[str, Any] = {"requests": requests}
     if doc.get("revisionId"):
@@ -772,14 +724,10 @@ async def modify_doc_text(
     TIP: To append text to the end of the document without calculating indices,
     set end_of_segment=true. This avoids index calculation errors.
 
-    HEADING MODE: Pass heading (the visible text of a body heading, e.g.
-    "Status") instead of start_index to address the section under that heading
-    without computing indices. The section runs from the heading to the next
-    heading of equal or shallower level (or the end of the body); the heading
-    paragraph itself is kept. In heading mode text is rendered as Markdown
-    (headings, lists, bold/italic, links, code), it replaces the section's
-    current content, and end_of_segment=true appends to the section instead.
-    Formatting parameters without text apply to the whole section body.
+    HEADING MODE: Pass heading instead of start_index to edit the body below a
+    heading, up to the next heading of equal or shallower level. text is
+    rendered as Markdown and replaces that body; end_of_segment=true appends
+    instead. Formatting parameters without text format the whole body.
 
     For ordinary header/footer text, prefer update_doc_headers_footers.
     Only pass segment_id when you already have a real header/footer/footnote
@@ -795,11 +743,9 @@ async def modify_doc_text(
         end_index: End position for text replacement/formatting (if not provided with text, text is inserted)
         text: New text to insert or replace with (optional - can format existing text without changing it).
             Rendered as Markdown when heading is set.
-        heading: Visible text of a body heading (case-sensitive) whose section to edit,
-            instead of start_index/end_index. text is rendered as Markdown and replaces
-            the section content below the heading (end_of_segment=true appends instead);
-            formatting parameters without text apply to the whole section.
-        heading_level: Optional 1-6 to require a specific heading level when matching heading
+        heading: Text of a body heading (case-insensitive, must match exactly one) whose
+            section to edit instead of start_index/end_index
+        heading_level: Optional 1-6 heading level to narrow the heading match
         tab_id: Optional document tab ID to target (required with heading when the doc has multiple tabs)
         segment_id: Optional header/footer/footnote segment ID to target
         end_of_segment: Insert text at the end of the targeted segment instead of start_index

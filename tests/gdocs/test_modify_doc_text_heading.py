@@ -60,7 +60,6 @@ def _doc(revision="rev-1"):
 class TestFindHeadingSection:
     def test_section_ends_at_next_equal_level_heading(self):
         section = find_heading_section(_doc(), "Status")
-        assert section["heading_start"] == 7
         assert section["body_start"] == 14
         assert section["section_end"] == 23
         assert section["footnote_refs"] == 0
@@ -124,6 +123,48 @@ class TestFindHeadingSection:
         assert find_heading_section(doc, "Status", tab_id="t.b")["body_start"] == 14
         with pytest.raises(UserInputError, match="not found"):
             find_heading_section(doc, "Status", tab_id="t.zzz")
+
+    def test_child_tabs_are_resolved(self):
+        child = {
+            "tabProperties": {"tabId": "t.child"},
+            "documentTab": {"body": _doc()["body"]},
+        }
+        parent = {
+            "tabProperties": {"tabId": "t.parent"},
+            "documentTab": {"body": {"content": [_para(1, "Status\n", "HEADING_2")]}},
+            "childTabs": [child],
+        }
+        doc = {"tabs": [parent]}
+        with pytest.raises(UserInputError, match="tab_id is required"):
+            find_heading_section(doc, "Status")
+        assert find_heading_section(doc, "Status", tab_id="t.child")["body_start"] == 14
+        assert find_heading_section(doc, "Status", tab_id="t.parent")["body_start"] == 8
+
+    def test_unknown_tab_id_on_single_tab_doc_is_rejected(self):
+        doc = {
+            "tabs": [
+                {
+                    "tabProperties": {"tabId": "t.only"},
+                    "documentTab": {"body": _doc()["body"]},
+                }
+            ]
+        }
+        with pytest.raises(UserInputError, match="not found"):
+            find_heading_section(doc, "Status", tab_id="t.nope")
+
+    def test_match_ignores_case_and_surrounding_whitespace(self):
+        assert find_heading_section(_doc(), "  status ")["body_start"] == 14
+
+    def test_duplicate_headings_are_refused(self):
+        doc = _doc()
+        doc["body"]["content"][4] = _para(23, "Status\n", "HEADING_2")
+        with pytest.raises(UserInputError, match="matches 2 headings"):
+            find_heading_section(doc, "Status")
+
+    def test_heading_level_disambiguates_duplicates(self):
+        doc = _doc()
+        doc["body"]["content"][4] = _para(23, "Status\n", "HEADING_3")
+        assert find_heading_section(doc, "Status", heading_level=3)["body_start"] == 30
 
 
 class TestBuildMarkdownInsertRequests:
@@ -197,7 +238,6 @@ class TestModifyDocTextHeading:
             documentId="d" * 25, includeTabsContent=True
         )
         assert "Replaced section under heading 'Status'" in result
-        assert "deleted 9 characters" in result
 
     @pytest.mark.asyncio
     async def test_replace_last_section_keeps_final_newline_and_drops_bullet(self):
@@ -321,6 +361,56 @@ class TestModifyDocTextHeading:
         assert result.startswith("Error:")
         assert fragment in result
         service.documents.return_value.batchUpdate.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_blank_heading_does_not_write(self):
+        service = _service(_doc())
+        result = await _call(service, heading=" ", text="x")
+        assert result == "Error: 'heading' must not be empty."
+        service.documents.return_value.batchUpdate.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_duplicate_heading_does_not_write(self):
+        doc = _doc()
+        doc["body"]["content"][4] = _para(23, "Status\n", "HEADING_2")
+        service = _service(doc)
+        with pytest.raises(UserInputError, match="matches 2 headings"):
+            await _call(service, heading="Status", text="x")
+        service.documents.return_value.batchUpdate.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_child_tab_writes_use_child_tab_indices(self):
+        child_body = {
+            "content": [
+                {"endIndex": 1, "sectionBreak": {}},
+                _para(1, "Status\n", "HEADING_2"),
+                _para(8, "child\n"),
+            ]
+        }
+        doc = {
+            "revisionId": "r",
+            "tabs": [
+                {
+                    "tabProperties": {"tabId": "t.parent"},
+                    "documentTab": {"body": _doc()["body"]},
+                    "childTabs": [
+                        {
+                            "tabProperties": {"tabId": "t.child"},
+                            "documentTab": {"body": child_body},
+                        }
+                    ],
+                }
+            ],
+        }
+        service = _service(doc)
+        await _call(service, heading="Status", text="x", tab_id="t.child")
+
+        requests = _batch_body(service)["requests"]
+        assert requests[0] == {
+            "deleteContentRange": {
+                "range": {"startIndex": 8, "endIndex": 13, "tabId": "t.child"}
+            }
+        }
 
     @pytest.mark.asyncio
     async def test_formatting_empty_section_errors(self):

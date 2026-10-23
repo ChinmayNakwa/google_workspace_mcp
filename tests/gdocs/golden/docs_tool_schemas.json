@@ -56,7 +56,7 @@
           }
         ],
         "default": null,
-        "description": "Visible text of a body heading (case-sensitive) whose section to edit,\ninstead of start_index/end_index. text is rendered as Markdown and replaces\nthe section content below the heading (end_of_segment=true appends instead);\nformatting parameters without text apply to the whole section."
+        "description": "Text of a body heading (case-insensitive, must match exactly one) whose\nsection to edit instead of start_index/end_index"
       },
       "heading_level": {
         "anyOf": [
@@ -68,7 +68,7 @@
           }
         ],
         "default": null,
-        "description": "Optional 1-6 to require a specific heading level when matching heading"
+        "description": "Optional 1-6 heading level to narrow the heading match"
       },
       "tab_id": {
         "anyOf": [
