@@ -43,14 +43,16 @@ Render a slide (or any page, including a notes page) to a PNG and return it as i
 
 `size` sets the image width:
 
-| Size | Width | Approx. image tokens |
-|------|-------|----------------------|
-| `SMALL` | 200px | rough overview only |
-| `MEDIUM` | 800px | ~425-480 |
-| `LARGE` | 1600px | ~1,445-1,920 |
-| `WIDTH2000_PX` | 2000px | ~2,125-3,000 |
+| Size | Width | Approx. image tokens | Use for |
+|------|-------|----------------------|---------|
+| `SMALL` | 200px | ~35 | layout only; text is unreadable |
+| `MEDIUM` | 800px | ~450-500 | titles and body text |
+| `LARGE` | 1600px | ~1,750-1,900 | small text: tables, chart labels, footnotes |
+| `WIDTH2000_PX` | 2000px | ~2,700-3,000 | rarely reads more than `LARGE` |
 
-Start at `MEDIUM`. Use `LARGE` or `WIDTH2000_PX` only for a page whose fine detail you need. Any other value is rejected before the API is called.
+Token costs are for Claude and GPT models; DeepSeek costs about half. None of them downscales `MEDIUM` or `LARGE`, so the image the model sees is the one you asked for.
+
+Start at `MEDIUM`, and re-render at `LARGE` only for a slide whose small text you need to read. Any other value is rejected before the API is called.
 
 The result is a short text block (presentation ID, page ID, size, and the image URL) followed by the image. If the image cannot be fetched, only the text block comes back, with a note saying so.
 

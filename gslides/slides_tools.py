@@ -863,10 +863,12 @@ async def render_page_to_image(
         page_object_id (str): The object ID of the page/slide to render.
         size (str): Image width. One of "SMALL" (200px), "MEDIUM" (800px),
             "LARGE" (1600px) or "WIDTH2000_PX" (2000px). Defaults to "MEDIUM".
-            Start at MEDIUM: it is enough to read a slide's layout and text,
-            at roughly 425-480 tokens per image. Use LARGE (~1,445-1,920
-            tokens) or WIDTH2000_PX (~2,125-3,000 tokens) only for a page whose
-            fine detail you need to see. SMALL suits only a rough overview.
+            Start at MEDIUM (~450-500 image tokens): it reads titles and body
+            text. Use LARGE (~1,750-1,900 tokens) for small text such as
+            tables, chart labels and footnotes. WIDTH2000_PX (~2,700-3,000
+            tokens) rarely reads more than LARGE. SMALL shows layout only; its
+            text is unreadable. Costs are for Claude and GPT; DeepSeek costs
+            about half.
 
     Returns:
         A short text block (presentation ID, page ID, size and a temporary
