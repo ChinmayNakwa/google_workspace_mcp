@@ -242,17 +242,16 @@ async def test_get_drive_file_content_image(mock_resolve_image, mime_type):
 @pytest.mark.parametrize(
     "mime_type, file_bytes",
     [
-        ("image/svg+xml", b'<svg xmlns="http://www.w3.org/2000/svg"></svg>'),
         ("image/bmp", b"BM" + b"\x00" * 64),
         ("image/tiff", b"II*\x00" + b"\x00" * 64),
     ],
-    ids=["svg", "bmp", "tiff"],
+    ids=["bmp", "tiff"],
 )
 async def test_get_drive_file_content_non_inline_image_unchanged(
     mock_resolve_image, mime_type, file_bytes
 ):
-    """SVG, BMP and TIFF keep the base64 text result; model APIs reject them
-    as image blocks, so they are not sent as image content."""
+    """BMP and TIFF keep the base64 text result; model APIs reject them as
+    image blocks, so they are not sent as image content."""
     mock_resolve_image.return_value[1]["mimeType"] = mime_type
     mock_service = Mock()
     mock_service.files().get_media.return_value = "req"
@@ -268,6 +267,68 @@ async def test_get_drive_file_content_non_inline_image_unchanged(
         f'File: "photo.png" (ID: img456, Type: {mime_type})\n'
         "Link: https://drive.google.com/file/img456\n\n--- CONTENT ---\n"
         f"[base64_image:{mime_type}]" + base64.b64encode(file_bytes).decode("ascii")
+    )
+
+
+_SVG_HEADER = (
+    'File: "photo.png" (ID: img456, Type: image/svg+xml)\n'
+    "Link: https://drive.google.com/file/img456\n\n--- CONTENT ---\n"
+)
+
+
+async def _get_svg(mock_resolve_image, svg_bytes):
+    mock_resolve_image.return_value[1]["mimeType"] = "image/svg+xml"
+    mock_service = Mock()
+    mock_service.files().get_media.return_value = "req"
+    with _patch_downloader(svg_bytes):
+        return await _unwrap(get_drive_file_content)(
+            service=mock_service,
+            user_google_email="user@example.com",
+            file_id="img456",
+        )
+
+
+@pytest.mark.asyncio
+async def test_get_drive_file_content_svg_returns_markup(mock_resolve_image):
+    """SVG is text: its markup comes back as a plain string, not base64."""
+    svg = '<svg xmlns="http://www.w3.org/2000/svg"><text>Q3 revenue</text></svg>'
+
+    result = await _get_svg(mock_resolve_image, svg.encode("utf-8"))
+
+    assert result == _SVG_HEADER + svg
+
+
+@pytest.mark.asyncio
+async def test_get_drive_file_content_svg_elides_embedded_base64(mock_resolve_image):
+    """An embedded raster image does not put its base64 back into the text."""
+    png = b"\x89PNG\r\n\x1a\n" + bytes(range(256)) * 40
+    payload = base64.b64encode(png).decode("ascii")
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg">'
+        f'<image href="data:image/png;base64,{payload}"/>'
+        "<text>Logo</text></svg>"
+    )
+
+    result = await _get_svg(mock_resolve_image, svg.encode("utf-8"))
+
+    assert payload not in result
+    assert result == _SVG_HEADER + (
+        '<svg xmlns="http://www.w3.org/2000/svg">'
+        f'<image href="data:image/png;base64,[{len(png)} bytes of base64 omitted]"/>'
+        "<text>Logo</text></svg>"
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_drive_file_content_svgz_reports_not_text(mock_resolve_image):
+    """A gzip-compressed .svgz is not UTF-8, so it gets a note, not garbage."""
+    svgz = b"\x1f\x8b\x08\x00" + bytes(range(256))
+
+    result = await _get_svg(mock_resolve_image, svgz)
+
+    assert result == _SVG_HEADER + (
+        f"[SVG is not UTF-8 text (it may be a compressed .svgz) - {len(svgz)} bytes. "
+        "Use get_drive_file_download_url to get the file instead.]"
     )
 
 

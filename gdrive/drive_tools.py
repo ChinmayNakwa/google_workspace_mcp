@@ -41,11 +41,13 @@ from core.utils import (
     GOOGLE_API_WRITE_RETRIES,
     IMAGE_MIME_TYPES,
     INLINE_IMAGE_MIME_TYPES,
+    SVG_MIME_TYPE,
     hide_local_file_args,
     hide_remote_only_args,
     local_file_access_enabled,
     encode_image_content,
     image_content_from_bytes,
+    svg_source_text,
     OfficeXmlExtractionError,
     OfficeXmlTooLargeError,
     UserInputError,
@@ -338,8 +340,8 @@ async def get_drive_file_content(
     • PDFs → text extracted with pypdf when possible; scanned/image-only PDFs
       fall back to a download hint.
     • Images (PNG, JPEG, GIF, WebP) → returned as MCP image content after the
-      metadata header; other image types (SVG, BMP, TIFF) are still returned
-      as base64 text.
+      metadata header. SVG → returned as its markup, with embedded base64
+      images elided. BMP and TIFF → still returned as base64 text.
     • Any other file → downloaded; tries UTF-8 decode, else notes binary.
 
     Args:
@@ -439,6 +441,16 @@ async def get_drive_file_content(
         body_text = (
             f"[Image attached as image content - {len(file_content_bytes)} bytes]"
         )
+    elif mime_type == SVG_MIME_TYPE:
+        svg_text = svg_source_text(file_content_bytes)
+        if svg_text is not None:
+            body_text = svg_text
+        else:
+            body_text = (
+                f"[SVG is not UTF-8 text (it may be a compressed .svgz) - "
+                f"{len(file_content_bytes)} bytes. "
+                f"Use get_drive_file_download_url to get the file instead.]"
+            )
     elif mime_type in IMAGE_MIME_TYPES:
         body_text = encode_image_content(file_content_bytes, mime_type)
     else:

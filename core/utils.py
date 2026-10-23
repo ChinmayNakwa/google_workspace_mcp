@@ -1035,10 +1035,24 @@ IMAGE_MIME_TYPES = {
 }
 
 # Image types multimodal model APIs accept in image blocks, so these are
-# returned as MCP image content. SVG is text, and BMP and TIFF are rejected by
-# most model APIs, so those three stay on the base64-text path until a
-# follow-up handles them (SVG as UTF-8 text is a separate ticket).
+# returned as MCP image content. BMP and TIFF are rejected by most model APIs,
+# so they stay on the base64-text path. SVG is returned as its source text.
 INLINE_IMAGE_MIME_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
+
+SVG_MIME_TYPE = "image/svg+xml"
+
+# A base64 data URI inside SVG markup, typically an embedded raster image.
+# Matching only the base64 alphabet keeps the match inside the attribute
+# value. Line breaks are allowed between base64 characters, since SVG tools
+# wrap long payloads, but the payload has to start and end with one, so the
+# match never runs across whitespace into the text that follows.
+_SVG_DATA_URI_RE = re.compile(
+    r"data:(?P<mime>[\w.+-]+/[\w.+-]+)?(?:;[\w.+-]+=[\w.+-]+)*;base64,"
+    r"(?P<payload>[A-Za-z0-9+/]+(?:\s*[A-Za-z0-9+/]+)*=*)"
+)
+
+# Payloads shorter than this are left alone: eliding them saves nothing.
+_SVG_MIN_ELIDED_PAYLOAD = 64
 
 
 def extract_pdf_text(file_bytes: bytes) -> Optional[str]:
@@ -1113,6 +1127,38 @@ def image_content_from_bytes(file_bytes: bytes, mime_type: str) -> ImageContent:
         data=base64.b64encode(file_bytes).decode("ascii"),
         mimeType=mime_type,
     )
+
+
+def svg_source_text(file_bytes: bytes) -> Optional[str]:
+    """
+    Return an SVG's markup as text, with embedded base64 payloads elided.
+
+    SVG is XML, so its labels and structure are readable as text, while model
+    APIs reject it as an image block. Design tools often embed raster images
+    as base64 data URIs, which would put a long base64 string back into the
+    text result, so each payload is replaced by a short note giving its size.
+
+    Args:
+        file_bytes: The SVG file content as bytes.
+
+    Returns:
+        Optional[str]: The markup, or None if the bytes are not UTF-8 text
+        (for example a gzip-compressed .svgz file).
+    """
+    try:
+        markup = file_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+    def _elide(match: re.Match) -> str:
+        payload = re.sub(r"\s", "", match.group("payload"))
+        if len(payload) < _SVG_MIN_ELIDED_PAYLOAD:
+            return match.group(0)
+        size = len(payload) * 3 // 4 - payload.count("=")
+        mime = match.group("mime") or "data"
+        return f"data:{mime};base64,[{size} bytes of base64 omitted]"
+
+    return _SVG_DATA_URI_RE.sub(_elide, markup)
 
 
 _URL_QUERY_RE = re.compile(r"\?.*?(?=\s+returned(?:\s|$)|[>\"']|$)")
