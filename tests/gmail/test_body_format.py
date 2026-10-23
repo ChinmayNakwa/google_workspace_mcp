@@ -214,6 +214,11 @@ class TestSignatureHtmlToText:
 
         assert _signature_html_to_text(signature) == "Jane\nFounder Example"
 
+    def test_separates_cells_with_omitted_end_tags(self):
+        signature = "<table><tr><th>Name<th>Title<tr><td>Jane<td>Founder</table>"
+
+        assert _signature_html_to_text(signature) == "Name Title\nJane Founder"
+
 
 class TestHtmlPlainTextAlternative:
     """The text/plain alternative of an outgoing HTML message is what non-HTML
