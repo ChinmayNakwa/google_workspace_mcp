@@ -317,6 +317,37 @@ class TestTextColors:
         assert "[color:" not in md
         assert "Themed" in md
 
+    RED = {"foregroundColor": {"color": {"rgbColor": {"red": 1.0}}}}
+    BLUE = {"foregroundColor": {"color": {"rgbColor": {"blue": 1.0}}}}
+    LINK = {"link": {"url": "https://example.com"}}
+
+    @pytest.mark.parametrize(
+        "runs, expected",
+        [
+            (
+                [("Hel", {**RED, "bold": True}), ("lo", RED), (" there\n", {})],
+                "**Hel**lo [color: #ff0000] there\n",
+            ),
+            ([("Hello", {}), (" ", RED), ("world\n", {})], "Hello world\n"),
+            ([("Owner ", RED), ("next\n", {})], "Owner [color: #ff0000] next\n"),
+            (
+                [("see ", {}), ("docs", {**RED, **LINK}), ("\n", {})],
+                "see [docs](https://example.com) [color: #ff0000]\n",
+            ),
+            (
+                [("re", {**RED, **LINK}), ("ad", {**BLUE, **LINK}), ("\n", {})],
+                "[re [color: #ff0000]ad](https://example.com) [color: #0000ff]\n",
+            ),
+        ],
+    )
+    def test_color_annotated_once_per_visible_run_group(self, runs, expected):
+        elements = [
+            {"textRun": {"content": content, "textStyle": style}}
+            for content, style in runs
+        ]
+        doc = {"body": {"content": [{"paragraph": {"elements": elements}}]}}
+        assert convert_doc_to_markdown(doc, include_colors=True) == expected
+
 
 class TestTextLinks:
     @pytest.mark.parametrize(

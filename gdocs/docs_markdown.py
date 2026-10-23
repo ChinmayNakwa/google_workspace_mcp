@@ -10,8 +10,7 @@ Converts Google Docs API JSON responses to clean Markdown, preserving:
 - Smart chips: person (@mentions), rich links, dates, inline images,
   footnotes, horizontal rules, auto-text (page numbers), equations
 - Document tabs (multi-tab and nested child tabs)
-- Run-level foreground text color, as a trailing ``[color: #rrggbb]``
-  annotation, when opted in via ``include_colors``
+- Explicit RGB text color as a trailing ``[color: #rrggbb]`` note (opt-in)
 """
 
 from __future__ import annotations
@@ -49,11 +48,7 @@ def convert_doc_to_markdown(doc: dict[str, Any], include_colors: bool = False) -
 
     Args:
         doc: The document JSON from docs.documents.get()
-        include_colors: Whether to annotate runs that carry an explicit
-            foreground text color with a trailing ``[color: #rrggbb]``
-            marker, matching the existing ``[heading: ...]``/``[tab: ...]``
-            annotation style used for internal links. Defaults to False so
-            existing callers see unchanged output.
+        include_colors: Mark text with an explicit RGB color as ``[color: #rrggbb]``
 
     Returns:
         Markdown string
@@ -221,17 +216,24 @@ def _convert_paragraph_text(
     parts: list[str] = []
     elements = para.get("elements", [])
     link_start = 0
+    color_visible = False
     for position, elem in enumerate(elements):
         if "textRun" in elem:
             link = text_run_link(elements, position)
             if text_run_link(elements, position - 1) != link:
                 link_start = len(parts)
-            parts.append(
-                _convert_text_run(elem["textRun"], skip_strikethrough, include_colors)
-            )
+            parts.append(_convert_text_run(elem["textRun"], skip_strikethrough))
             # Link a label split across styled runs once, after its final run.
             if link and text_run_link(elements, position + 1) != link:
                 parts[link_start:] = [_apply_link("".join(parts[link_start:]), link)]
+            color = _text_run_color(elements, position) if include_colors else None
+            if color:
+                if _text_run_color(elements, position - 1) != color:
+                    color_visible = False
+                color_visible |= bool(elem["textRun"].get("content", "").strip())
+                if color_visible and _text_run_color(elements, position + 1) != color:
+                    label = parts[-1].rstrip()
+                    parts[-1] = f"{label} [color: {color}]{parts[-1][len(label) :]}"
         elif "person" in elem:
             parts.append(_convert_person_chip(elem["person"]))
         elif "richLink" in elem:
@@ -267,9 +269,7 @@ def _convert_paragraph_text(
 
 
 def _convert_text_run(
-    text_run: dict[str, Any],
-    skip_strikethrough: bool = False,
-    include_colors: bool = False,
+    text_run: dict[str, Any], skip_strikethrough: bool = False
 ) -> str:
     """Convert a single text run to markdown."""
     content = text_run.get("content", "")
@@ -282,7 +282,7 @@ def _convert_text_run(
     if not text:
         return ""
 
-    return _apply_text_style(text, style, skip_strikethrough, include_colors)
+    return _apply_text_style(text, style, skip_strikethrough)
 
 
 def _convert_person_chip(person: dict[str, Any]) -> str:
@@ -439,10 +439,7 @@ def _convert_equation(equation: dict[str, Any]) -> str:
 
 
 def _apply_text_style(
-    text: str,
-    style: dict[str, Any],
-    skip_strikethrough: bool = False,
-    include_colors: bool = False,
+    text: str, style: dict[str, Any], skip_strikethrough: bool = False
 ) -> str:
     """Apply markdown formatting based on text style, excluding links."""
     font_family = style.get("weightedFontFamily", {}).get("fontFamily", "")
@@ -474,29 +471,22 @@ def _apply_text_style(
     if strikethrough and not skip_strikethrough:
         text = f"~~{text}~~"
 
-    if include_colors:
-        hex_color = _rgb_color_hex(style)
-        if hex_color:
-            text = f"{text} [color: {hex_color}]"
-
     return text
 
 
-def _rgb_color_hex(style: dict[str, Any]) -> str | None:
-    """Return a run's explicit foreground color as ``#rrggbb``, if any.
+def _text_run_color(elements: list[dict[str, Any]], index: int) -> str | None:
+    """Return the explicit RGB foreground color of the run at ``index`` as ``#rrggbb``.
 
-    Only resolves an RGB color (``textStyle.foregroundColor.color.rgbColor``).
-    Theme colors (``color.themeColor``, e.g. "TEXT1") have no fixed hex value
-    and are left unannotated rather than guessed.
+    Theme colors have no fixed hex value and return None.
     """
-    rgb_color = style.get("foregroundColor", {}).get("color", {}).get("rgbColor")
-    if rgb_color is None:
+    if not 0 <= index < len(elements):
         return None
-
-    def channel(key: str) -> int:
-        return min(255, max(0, round(rgb_color.get(key, 0.0) * 255)))
-
-    return f"#{channel('red'):02x}{channel('green'):02x}{channel('blue'):02x}"
+    style = elements[index].get("textRun", {}).get("textStyle", {})
+    rgb = style.get("foregroundColor", {}).get("color", {}).get("rgbColor")
+    if rgb is None:
+        return None
+    channels = (rgb.get(key, 0.0) for key in ("red", "green", "blue"))
+    return "#" + "".join(f"{min(255, max(0, round(c * 255))):02x}" for c in channels)
 
 
 def _apply_link(text: str, link: dict[str, Any]) -> str:
