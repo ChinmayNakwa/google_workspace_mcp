@@ -283,6 +283,25 @@ def test_svg_content_decodes_payload_wrapped_with_character_references(line_brea
     )
 
 
+def test_svg_content_matches_base64_marker_case_insensitively():
+    svg = f'<svg><image href="data:image/png;BASE64,{_b64(PNG)}"/></svg>'
+    result = svg_content(svg.encode())
+    assert [base64.b64decode(image.data) for image in result.images] == [PNG]
+    assert result.markup == (
+        f'<svg><image href="data:image/png;base64,[embedded image 1, {len(PNG)} bytes, attached as image content]"/></svg>'
+    )
+
+
+@pytest.mark.parametrize("leading", ["\n", " \n  ", "&#10;"])
+def test_svg_content_decodes_payload_after_leading_whitespace(leading):
+    svg = f'<svg><image href="data:image/png;base64,{leading}{_b64(PNG)}"/></svg>'
+    result = svg_content(svg.encode())
+    assert [base64.b64decode(image.data) for image in result.images] == [PNG]
+    assert result.markup == (
+        f'<svg><image href="data:image/png;base64,[embedded image 1, {len(PNG)} bytes, attached as image content]"/></svg>'
+    )
+
+
 def test_svg_content_leaves_non_base64_data_uris():
     """Percent-encoded data URIs are already text, so they are kept."""
     svg = '<svg><image href="data:image/svg+xml,%3Csvg%3E%3C/svg%3E"/></svg>'

@@ -1041,12 +1041,14 @@ INLINE_IMAGE_MIME_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
 
 SVG_MIME_TYPE = "image/svg+xml"
 
-# Line breaks, literal or as XML character references, may split a payload,
-# but it starts and ends with a base64 character so the match never runs into
+# Line breaks, literal or as XML character references, may precede or split a
+# payload, but it ends with a base64 character so the match never runs into
 # the text that follows.
 _SVG_DATA_URI_RE = re.compile(
     r"data:(?P<mime>[\w.+-]+/[\w.+-]+)?(?:;[\w.+-]+=[\w.+-]+)*;base64,"
-    r"(?P<payload>[A-Za-z0-9+/]+(?:(?:\s|&#x?[0-9A-Fa-f]+;)*[A-Za-z0-9+/]+)*=*)"
+    r"(?P<payload>(?:\s|&#x?[0-9A-Fa-f]+;)*"
+    r"[A-Za-z0-9+/]+(?:(?:\s|&#x?[0-9A-Fa-f]+;)*[A-Za-z0-9+/]+)*=*)",
+    re.IGNORECASE,
 )
 
 _SVG_MIN_ELIDED_PAYLOAD = 64
