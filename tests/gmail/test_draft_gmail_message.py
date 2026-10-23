@@ -1767,7 +1767,15 @@ async def test_send_gmail_message_quotes_original_when_requested():
 
 
 @pytest.mark.asyncio
-async def test_send_gmail_message_reply_all_derives_recipients():
+@pytest.mark.parametrize(
+    "cc, expected_cc",
+    [
+        (None, "bob@example.com, carol@example.com"),
+        ("", None),
+        ("explicit@example.com", "explicit@example.com"),
+    ],
+)
+async def test_send_gmail_message_reply_all_derives_recipients(cc, expected_cc):
     mock_service = _mock_gmail_service()
     mock_service.users().messages().send().execute.return_value = {"id": "sent_reply"}
     mock_service.users().threads().get().execute.return_value = {
@@ -1788,6 +1796,7 @@ async def test_send_gmail_message_reply_all_derives_recipients():
         body="Thanks all.",
         thread_id="thread123",
         reply_all=True,
+        cc=cc,
         include_signature=False,
     )
 
@@ -1796,8 +1805,7 @@ async def test_send_gmail_message_reply_all_derives_recipients():
     )
     parsed = _parse_raw_message(send_kwargs["body"]["raw"])
     assert parsed["To"] == "alice@example.com"
-    # The authenticated account is dropped; everyone else on the message is kept.
-    assert parsed["Cc"] == "bob@example.com, carol@example.com"
+    assert parsed["Cc"] == expected_cc
 
 
 @pytest.mark.asyncio
@@ -2007,7 +2015,15 @@ async def test_send_gmail_message_requires_to_when_forwarding():
 
 
 @pytest.mark.asyncio
-async def test_draft_gmail_message_reply_all_derives_recipients():
+@pytest.mark.parametrize(
+    "cc, expected_cc",
+    [
+        (None, "bob@example.com, carol@example.com"),
+        ("", None),
+        ("explicit@example.com", "explicit@example.com"),
+    ],
+)
+async def test_draft_gmail_message_reply_all_derives_recipients(cc, expected_cc):
     mock_service = _mock_gmail_service()
     mock_service.users().drafts().create().execute.return_value = {"id": "draft_reply"}
     mock_service.users().threads().get().execute.return_value = {
@@ -2028,6 +2044,7 @@ async def test_draft_gmail_message_reply_all_derives_recipients():
         body="Thanks all.",
         thread_id="thread123",
         reply_all=True,
+        cc=cc,
         include_signature=False,
     )
 
@@ -2036,8 +2053,7 @@ async def test_draft_gmail_message_reply_all_derives_recipients():
     )
     parsed = _parse_raw_message(create_kwargs["body"]["message"]["raw"])
     assert parsed["To"] == "alice@example.com"
-    # The authenticated account is dropped; everyone else on the message is kept.
-    assert parsed["Cc"] == "bob@example.com, carol@example.com"
+    assert parsed["Cc"] == expected_cc
 
 
 @pytest.mark.asyncio
