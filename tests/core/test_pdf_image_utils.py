@@ -3,10 +3,9 @@
 import base64
 import io
 import pytest
-
-from tests.helpers import _make_minimal_pdf
 from mcp.types import ImageContent
 
+from tests.helpers import _make_minimal_pdf
 from core.utils import (
     IMAGE_MIME_TYPES,
     INLINE_IMAGE_MIME_TYPES,
@@ -245,7 +244,7 @@ def test_svg_content_omits_payloads_that_are_not_attachable_images():
         f"<style>@font-face{{src:url(data:font/woff2;base64,[{len(FONT)} bytes omitted])}}</style>"
         f'<image href="data:image/bmp;base64,[{len(bmp)} bytes omitted]"/>'
         f'<image href="data:image/png;base64,[{len(FONT)} bytes omitted]"/>'
-        f'<image href="data:data;base64,[{len(FONT)} bytes omitted]"/>'
+        f'<image href="data:;base64,[{len(FONT)} bytes omitted]"/>'
     )
 
 
@@ -263,6 +262,19 @@ def test_svg_content_decodes_whitespace_wrapped_payload():
     """SVG tools often wrap long base64 payloads across lines."""
     encoded = _b64(PNG)
     wrapped = "\n".join(encoded[i : i + 76] for i in range(0, len(encoded), 76))
+    svg = f'<svg><image href="data:image/png;base64,{wrapped}"/></svg>'
+    result = svg_content(svg.encode())
+    assert [base64.b64decode(image.data) for image in result.images] == [PNG]
+    assert result.markup == (
+        f'<svg><image href="data:image/png;base64,[embedded image 1, {len(PNG)} bytes, attached as image content]"/></svg>'
+    )
+
+
+@pytest.mark.parametrize("line_break", ["&#10;", "&#xA;", "&#13;&#10;"])
+def test_svg_content_decodes_payload_wrapped_with_character_references(line_break):
+    """XML serializers write a line break inside an attribute as a reference."""
+    encoded = _b64(PNG)
+    wrapped = line_break.join(encoded[i : i + 76] for i in range(0, len(encoded), 76))
     svg = f'<svg><image href="data:image/png;base64,{wrapped}"/></svg>'
     result = svg_content(svg.encode())
     assert [base64.b64decode(image.data) for image in result.images] == [PNG]

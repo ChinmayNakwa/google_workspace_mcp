@@ -1,5 +1,6 @@
 import base64
 import binascii
+import html
 import io
 import json
 import logging
@@ -1035,24 +1036,19 @@ IMAGE_MIME_TYPES = {
     "image/svg+xml",
 }
 
-# Image types multimodal model APIs accept in image blocks, so these are
-# returned as MCP image content. BMP and TIFF are rejected by most model APIs,
-# so they stay on the base64-text path. SVG is returned as its source text.
+# Model APIs reject BMP, TIFF and SVG as image blocks.
 INLINE_IMAGE_MIME_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
 
 SVG_MIME_TYPE = "image/svg+xml"
 
-# A base64 data URI inside SVG markup, typically an embedded raster image.
-# Matching only the base64 alphabet keeps the match inside the attribute
-# value. Line breaks are allowed between base64 characters, since SVG tools
-# wrap long payloads, but the payload has to start and end with one, so the
-# match never runs across whitespace into the text that follows.
+# Line breaks, literal or as XML character references, may split a payload,
+# but it starts and ends with a base64 character so the match never runs into
+# the text that follows.
 _SVG_DATA_URI_RE = re.compile(
     r"data:(?P<mime>[\w.+-]+/[\w.+-]+)?(?:;[\w.+-]+=[\w.+-]+)*;base64,"
-    r"(?P<payload>[A-Za-z0-9+/]+(?:\s*[A-Za-z0-9+/]+)*=*)"
+    r"(?P<payload>[A-Za-z0-9+/]+(?:(?:\s|&#x?[0-9A-Fa-f]+;)*[A-Za-z0-9+/]+)*=*)"
 )
 
-# Payloads shorter than this are left alone: eliding them saves nothing.
 _SVG_MIN_ELIDED_PAYLOAD = 64
 
 
@@ -1105,9 +1101,6 @@ def image_content_from_bytes(file_bytes: bytes, mime_type: str) -> ImageContent:
     """
     Wrap image bytes as an MCP ImageContent block.
 
-    Returning images as typed content lets multimodal clients bill and render
-    them as images, instead of tokenising a base64 string as text.
-
     Args:
         file_bytes: The image file content as bytes.
         mime_type: The MIME type of the image (must start with "image/").
@@ -1135,9 +1128,6 @@ def sniff_inline_image_mime_type(data: bytes) -> Optional[str]:
     Identify image bytes by their magic number, for the types in
     INLINE_IMAGE_MIME_TYPES only.
 
-    A declared type, such as a data URI's, can be wrong, and an image block
-    whose bytes don't match its type can fail the whole model request.
-
     Returns:
         Optional[str]: The MIME type, or None if the bytes are not PNG, JPEG,
         GIF or WebP.
@@ -1163,12 +1153,7 @@ class SvgContent(NamedTuple):
 def svg_content(file_bytes: bytes) -> Optional[SvgContent]:
     """
     Read an SVG as its markup, with embedded raster images pulled out as
-    image content.
-
-    SVG is XML, so its labels and structure are readable as text, while model
-    APIs reject it as an image block. Design tools often embed raster images
-    and fonts as base64 data URIs, which would put a long base64 string back
-    into the text. So each payload is replaced by a short note:
+    image content. Each base64 data URI payload is replaced by a short note:
 
     - A PNG, JPEG, GIF or WebP payload (identified by its bytes, not the type
       the URI declares) is decoded and attached as image content. Its note is
@@ -1177,7 +1162,7 @@ def svg_content(file_bytes: bytes) -> Optional[SvgContent]:
       decode) is omitted, and its note gives its size.
 
     Payloads shorter than _SVG_MIN_ELIDED_PAYLOAD characters are left in
-    place, since eliding them saves nothing.
+    place.
 
     Args:
         file_bytes: The SVG file content as bytes.
@@ -1195,10 +1180,10 @@ def svg_content(file_bytes: bytes) -> Optional[SvgContent]:
     images: List[ImageContent] = []
 
     def _elide(match: re.Match) -> str:
-        payload = re.sub(r"\s", "", match.group("payload"))
+        payload = re.sub(r"\s", "", html.unescape(match.group("payload")))
         if len(payload) < _SVG_MIN_ELIDED_PAYLOAD:
             return match.group(0)
-        declared = match.group("mime") or "data"
+        declared = match.group("mime") or ""
         try:
             data = base64.b64decode(payload, validate=True)
         except (binascii.Error, ValueError):

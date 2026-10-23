@@ -47,6 +47,7 @@ from core.utils import (
     local_file_access_enabled,
     encode_image_content,
     image_content_from_bytes,
+    sniff_inline_image_mime_type,
     svg_content,
     OfficeXmlExtractionError,
     OfficeXmlTooLargeError,
@@ -437,8 +438,10 @@ async def get_drive_file_content(
                 f"- the file may be scanned/image-only. "
                 f"Use get_drive_file_download_url to get a direct download link instead.]"
             )
-    elif mime_type in INLINE_IMAGE_MIME_TYPES:
-        images.append(image_content_from_bytes(file_content_bytes, mime_type))
+    elif mime_type in INLINE_IMAGE_MIME_TYPES and (
+        inline_mime_type := sniff_inline_image_mime_type(file_content_bytes)
+    ):
+        images.append(image_content_from_bytes(file_content_bytes, inline_mime_type))
         body_text = (
             f"[Image attached as image content - {len(file_content_bytes)} bytes]"
         )

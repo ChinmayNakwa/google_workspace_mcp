@@ -8,7 +8,6 @@ import pytest
 from fastmcp.tools import ToolResult
 from mcp.types import ImageContent, TextContent
 
-from core.utils import INLINE_IMAGE_MIME_TYPES
 from tests.helpers import _make_minimal_pdf
 from gdrive.drive_helpers import _download_file_bytes
 from gdrive.drive_tools import get_drive_file_content
@@ -203,10 +202,19 @@ async def test_get_drive_file_content_reports_oversized_expansion(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mime_type", sorted(INLINE_IMAGE_MIME_TYPES))
-async def test_get_drive_file_content_image(mock_resolve_image, mime_type):
+@pytest.mark.parametrize(
+    "mime_type, magic",
+    [
+        ("image/png", b"\x89PNG\r\n\x1a\n"),
+        ("image/jpeg", b"\xff\xd8\xff\xe0"),
+        ("image/gif", b"GIF89a"),
+        ("image/webp", b"RIFF\x00\x00\x00\x00WEBP"),
+    ],
+    ids=["png", "jpeg", "gif", "webp"],
+)
+async def test_get_drive_file_content_image(mock_resolve_image, mime_type, magic):
     mock_resolve_image.return_value[1]["mimeType"] = mime_type
-    image_bytes = b"\x89PNG\r\n\x1a\n" + bytes(range(256)) * 4
+    image_bytes = magic + bytes(range(256)) * 4
     encoded = base64.b64encode(image_bytes).decode("ascii")
     mock_service = Mock()
     mock_service.files().get_media.return_value = "req"
@@ -236,6 +244,52 @@ async def test_get_drive_file_content_image(mock_resolve_image, mime_type):
     assert base64.b64decode(image_block.data) == image_bytes
 
     assert result.structured_content == {"result": text_block.text}
+
+
+@pytest.mark.asyncio
+async def test_get_drive_file_content_image_uses_type_from_bytes(mock_resolve_image):
+    """A JPEG that Drive labels image/png is attached as image/jpeg."""
+    jpeg = b"\xff\xd8\xff\xe0" + bytes(range(256))
+    mock_service = Mock()
+    mock_service.files().get_media.return_value = "req"
+
+    with _patch_downloader(jpeg):
+        result = await _unwrap(get_drive_file_content)(
+            service=mock_service,
+            user_google_email="user@example.com",
+            file_id="img456",
+        )
+
+    _, image_block = result.content
+    assert image_block.mime_type == "image/jpeg"
+    assert base64.b64decode(image_block.data) == jpeg
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "file_bytes",
+    [b"\x00\x00\x00\x18ftypheic" + bytes(64), b""],
+    ids=["heic", "empty"],
+)
+async def test_get_drive_file_content_mislabelled_image_stays_base64_text(
+    mock_resolve_image, file_bytes
+):
+    """Bytes that are not an attachable image are never sent as an image block."""
+    mock_service = Mock()
+    mock_service.files().get_media.return_value = "req"
+
+    with _patch_downloader(file_bytes):
+        result = await _unwrap(get_drive_file_content)(
+            service=mock_service,
+            user_google_email="user@example.com",
+            file_id="img456",
+        )
+
+    assert result == (
+        'File: "photo.png" (ID: img456, Type: image/png)\n'
+        "Link: https://drive.google.com/file/img456\n\n--- CONTENT ---\n"
+        "[base64_image:image/png]" + base64.b64encode(file_bytes).decode("ascii")
+    )
 
 
 @pytest.mark.asyncio
