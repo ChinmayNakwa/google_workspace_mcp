@@ -557,6 +557,7 @@ async def test_get_gmail_message_content_metadata_format_returns_headers_only():
         ({"body_format": "html"}, "require format='full'"),
         ({"body_format": "raw"}, "require format='full'"),
         ({"full": True}, "full=True requires format='full'"),
+        ({"include_headers": False}, "include_headers=False requires format='full'"),
     ],
 )
 async def test_get_gmail_message_content_rejects_metadata_with_body_options(
@@ -1095,3 +1096,61 @@ async def test_full_export_long_subject_does_not_crash(stdio_storage):
     saved_path = _saved_path(result)
     assert Path(saved_path).exists()
     assert len(Path(saved_path).name) < 255
+
+
+SPAM_SUBJECT = "\U0001f525\U0001f525 WIN BIG \U0001f525\U0001f525"
+
+
+def _spam_service(message_id: str):
+    headers = _headers(Subject=SPAM_SUBJECT, From="Spammer <spam@example.com>")
+    return _build_service(
+        message_responses={
+            (message_id, "metadata"): _metadata_response(message_id, headers=headers),
+            (message_id, "full"): _message_response(
+                message_id, text="spam body", headers=headers
+            ),
+            (message_id, "raw"): {"raw": _encode("spam body")},
+        }
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("body_format", ["text", "raw"])
+async def test_full_export_without_headers_keeps_subject_out(
+    stdio_storage, body_format
+):
+    result = await _unwrap(get_gmail_message_content)(
+        service=_spam_service("spam-1"),
+        message_id="spam-1",
+        user_google_email="user@example.com",
+        body_format=body_format,
+        full=True,
+        include_headers=False,
+    )
+
+    assert SPAM_SUBJECT not in result
+    assert "Spammer" not in result
+    assert "From:" not in result
+    saved_path = _saved_path(result)
+    assert Path(saved_path).name.startswith("spam-1_")
+    with open(saved_path, "rb") as fh:
+        assert fh.read().decode() == "spam body"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("body_format", "marker"), [("text", "--- BODY ---"), ("raw", "--- RAW MIME ---")]
+)
+async def test_inline_content_without_headers_keeps_subject_out(body_format, marker):
+    result = await _unwrap(get_gmail_message_content)(
+        service=_spam_service("spam-2"),
+        message_id="spam-2",
+        user_google_email="user@example.com",
+        body_format=body_format,
+        include_headers=False,
+    )
+
+    assert SPAM_SUBJECT not in result
+    assert "From:" not in result
+    assert marker in result
+    assert "spam body" in result
