@@ -14,7 +14,7 @@ import pytz
 from googleapiclient.errors import HttpError
 
 from auth.service_decorator import require_google_service
-from core.utils import handle_http_errors, StringList, StringOrDictList
+from core.utils import handle_http_errors, StringList, StringOrDictList, UserInputError
 from gcalendar.calendar_helpers import (
     _apply_transparency_if_valid,
     _apply_visibility_if_valid,
@@ -177,7 +177,7 @@ async def get_events(
         # to "now", which would change the query between pages.
         formatted_time_min = _correct_time_format_for_api(time_min, "time_min", None)
         if page_token and formatted_time_min is None and single_events:
-            raise ValueError(
+            raise UserInputError(
                 "[get_events] page_token requires time_min. Pass the Pagination "
                 "time_min from the previous response to preserve the original range."
             )
@@ -834,7 +834,7 @@ async def _rsvp_event_impl(
     """Internal implementation for responding to a calendar event invitation."""
     valid_responses = {"accepted", "declined", "tentative", "needsAction"}
     if response not in valid_responses:
-        raise ValueError(
+        raise UserInputError(
             f"Invalid response '{response}'. Must be one of: {sorted(valid_responses)}"
         )
 
@@ -997,7 +997,7 @@ async def manage_event(
     if send_updates is not None:
         valid_send_updates = {"all", "externalOnly", "none"}
         if send_updates not in valid_send_updates:
-            raise ValueError(
+            raise UserInputError(
                 f"Invalid send_updates '{send_updates}'. Must be one of: {sorted(valid_send_updates)}"
             )
 
@@ -1017,7 +1017,7 @@ async def manage_event(
 
     if action_lower == "create":
         if not summary or not start_time or not end_time:
-            raise ValueError(
+            raise UserInputError(
                 "summary, start_time, and end_time are required for create action"
             )
         return await _create_event_impl(
@@ -1051,7 +1051,7 @@ async def manage_event(
         )
     elif action_lower == "update":
         if not event_id:
-            raise ValueError("event_id is required for update action")
+            raise UserInputError("event_id is required for update action")
         return await _modify_event_impl(
             service=service,
             user_google_email=user_google_email,
@@ -1082,7 +1082,7 @@ async def manage_event(
         )
     elif action_lower == "delete":
         if not event_id:
-            raise ValueError("event_id is required for delete action")
+            raise UserInputError("event_id is required for delete action")
         return await _delete_event_impl(
             service=service,
             user_google_email=user_google_email,
@@ -1092,9 +1092,9 @@ async def manage_event(
         )
     elif action_lower == "rsvp":
         if not event_id:
-            raise ValueError("event_id is required for rsvp action")
+            raise UserInputError("event_id is required for rsvp action")
         if not response:
-            raise ValueError("response is required for rsvp action")
+            raise UserInputError("response is required for rsvp action")
         return await _rsvp_event_impl(
             service=service,
             user_google_email=user_google_email,
@@ -1105,7 +1105,7 @@ async def manage_event(
             send_updates=send_updates or "all",
         )
     else:
-        raise ValueError(
+        raise UserInputError(
             f"Invalid action '{action_lower}'. Must be 'create', 'update', 'delete', or 'rsvp'."
         )
 
@@ -1201,7 +1201,7 @@ async def _list_ooo_events_impl(
 
     formatted_time_min = _correct_time_format_for_api(time_min, "time_min", timezone)
     if page_token and formatted_time_min is None:
-        raise ValueError(
+        raise UserInputError(
             "[list_ooo_events] page_token requires time_min. Pass the Pagination "
             "time_min from the previous response to preserve the original range."
         )
@@ -1311,7 +1311,7 @@ async def _update_ooo_event_impl(
     )
 
     if existing_event.get("eventType") != "outOfOffice":
-        raise ValueError(
+        raise UserInputError(
             f"Event '{event_id}' is not an Out of Office event (type: '{existing_event.get('eventType', 'default')}'). "
             f"Use manage_event to update regular events."
         )
@@ -1397,7 +1397,7 @@ async def _delete_ooo_event_impl(
             )
         )
         if existing_event.get("eventType") != "outOfOffice":
-            raise ValueError(
+            raise UserInputError(
                 f"Event '{event_id}' is not an Out of Office event (type: '{existing_event.get('eventType', 'default')}'). "
                 f"Use manage_event to delete regular events."
             )
@@ -1478,7 +1478,9 @@ async def manage_out_of_office(
     action_lower = action.lower().strip()
     if action_lower == "create":
         if not start_time or not end_time:
-            raise ValueError("start_time and end_time are required for create action")
+            raise UserInputError(
+                "start_time and end_time are required for create action"
+            )
         return await _create_ooo_event_impl(
             service=service,
             user_google_email=user_google_email,
@@ -1504,7 +1506,7 @@ async def manage_out_of_office(
         )
     elif action_lower == "update":
         if not event_id:
-            raise ValueError("event_id is required for update action")
+            raise UserInputError("event_id is required for update action")
         return await _update_ooo_event_impl(
             service=service,
             user_google_email=user_google_email,
@@ -1520,7 +1522,7 @@ async def manage_out_of_office(
         )
     elif action_lower == "delete":
         if not event_id:
-            raise ValueError("event_id is required for delete action")
+            raise UserInputError("event_id is required for delete action")
         return await _delete_ooo_event_impl(
             service=service,
             user_google_email=user_google_email,
@@ -1528,7 +1530,7 @@ async def manage_out_of_office(
             calendar_id=calendar_id,
         )
     else:
-        raise ValueError(
+        raise UserInputError(
             f"Invalid action '{action_lower}'. Must be 'create', 'list', 'update', or 'delete'."
         )
 
@@ -1636,7 +1638,7 @@ async def _list_focus_time_events_impl(
 
     formatted_time_min = _correct_time_format_for_api(time_min, "time_min", timezone)
     if page_token and formatted_time_min is None:
-        raise ValueError(
+        raise UserInputError(
             "[list_focus_time_events] page_token requires time_min. Pass the Pagination "
             "time_min from the previous response to preserve the original range."
         )
@@ -1751,7 +1753,7 @@ async def _update_focus_time_event_impl(
     )
 
     if existing_event.get("eventType") != "focusTime":
-        raise ValueError(
+        raise UserInputError(
             f"Event '{event_id}' is not a Focus Time event (type: '{existing_event.get('eventType', 'default')}'). "
             f"Use manage_event to update regular events."
         )
@@ -1847,7 +1849,7 @@ async def _delete_focus_time_event_impl(
             )
         )
         if existing_event.get("eventType") != "focusTime":
-            raise ValueError(
+            raise UserInputError(
                 f"Event '{event_id}' is not a Focus Time event (type: '{existing_event.get('eventType', 'default')}'). "
                 f"Use manage_event to delete regular events."
             )
@@ -1933,7 +1935,9 @@ async def manage_focus_time(
     action_lower = action.lower().strip()
     if action_lower == "create":
         if not start_time or not end_time:
-            raise ValueError("start_time and end_time are required for create action")
+            raise UserInputError(
+                "start_time and end_time are required for create action"
+            )
         return await _create_focus_time_event_impl(
             service=service,
             user_google_email=user_google_email,
@@ -1961,7 +1965,7 @@ async def manage_focus_time(
         )
     elif action_lower == "update":
         if not event_id:
-            raise ValueError("event_id is required for update action")
+            raise UserInputError("event_id is required for update action")
         return await _update_focus_time_event_impl(
             service=service,
             user_google_email=user_google_email,
@@ -1979,7 +1983,7 @@ async def manage_focus_time(
         )
     elif action_lower == "delete":
         if not event_id:
-            raise ValueError("event_id is required for delete action")
+            raise UserInputError("event_id is required for delete action")
         return await _delete_focus_time_event_impl(
             service=service,
             user_google_email=user_google_email,
@@ -1987,7 +1991,7 @@ async def manage_focus_time(
             calendar_id=calendar_id,
         )
     else:
-        raise ValueError(
+        raise UserInputError(
             f"Invalid action '{action_lower}'. Must be 'create', 'list', 'update', or 'delete'."
         )
 

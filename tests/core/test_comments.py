@@ -15,6 +15,7 @@ from core.comments import (
     _resolve_comment_impl,
     create_comment_tools,
 )
+from core.utils import UserInputError
 
 
 def _make_comment(comment_id, content="Comment text", author="Alice"):
@@ -400,22 +401,26 @@ class TestCommentsEdgeCases:
     """Edge cases for comment pagination."""
 
     @pytest.mark.asyncio
-    async def test_max_comments_zero_returns_empty(self):
-        """max_comments=0 returns the no-comments message."""
+    @pytest.mark.parametrize("max_comments", [0, -5])
+    async def test_non_positive_max_comments_is_rejected(self, max_comments):
+        """A per-call cap below 1 is an input error, not an empty result."""
         mock_service = Mock()
-        result = await _read_comments_impl(
-            mock_service, "document", "doc1", max_comments=0
-        )
-        assert "No comments found" in result
+        with pytest.raises(UserInputError, match="positive integer"):
+            await _read_comments_impl(
+                mock_service, "document", "doc1", max_comments=max_comments
+            )
         mock_service.comments.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_negative_max_comments_falls_back_to_default(self):
-        """Negative max_comments falls back to the default (100)."""
+    @pytest.mark.parametrize("env_value", ["0", "-5"])
+    async def test_non_positive_env_var_falls_back_to_default(self, env_value):
+        """A non-positive WORKSPACE_MCP_COMMENTS_MAX falls back to 100."""
         comments = [_make_comment(f"c{i}") for i in range(3)]
         mock_service = _mock_service_pages([(comments, None)])
 
-        await _read_comments_impl(mock_service, "document", "doc1", max_comments=-5)
+        with patch.dict(os.environ, {"WORKSPACE_MCP_COMMENTS_MAX": env_value}):
+            await _read_comments_impl(mock_service, "document", "doc1")
+
         call_kwargs = mock_service.comments.return_value.list.call_args.kwargs
         assert call_kwargs["pageSize"] == 100
 

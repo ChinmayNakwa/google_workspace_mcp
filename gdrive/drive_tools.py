@@ -89,6 +89,7 @@ from gdrive.drive_helpers import (
     flag_incomplete_search,
     list_all_permissions,
     derive_shared_state,
+    escape_drive_query_value,
     format_permission_info,
     get_drive_image_url,
     has_explicit_trashed_clause,
@@ -227,7 +228,7 @@ async def search_drive_files(
         logger.debug(f"[search_drive_files] Using structured query: '{final_query}'")
     else:
         # For free text queries, wrap in fullText contains
-        escaped_query = query.replace("\\", "\\\\").replace("'", "\\'")
+        escaped_query = escape_drive_query_value(query)
         final_query = f"fullText contains '{escaped_query}'"
         logger.debug(
             f"[search_drive_files] Reformatting free text query '{query}' to '{final_query}'"
@@ -528,7 +529,10 @@ async def get_drive_file_download_url(
                       For Sheets: supports 'csv', 'pdf', or 'xlsx' (default).
 
     Returns:
-        str: File metadata with either a local file path or download URL.
+        str: File metadata with either a local file path or download URL. In
+        stateless mode the same text comes back as a ToolResult that also
+        embeds the file; the annotation stays str so the advertised output
+        schema is unchanged.
     """
     logger.info(
         f"[get_drive_file_download_url] Invoked. File ID: '{file_id}', Export format: {export_format}"
@@ -1741,7 +1745,7 @@ async def check_drive_file_public_access(
     logger.debug(f"[check_drive_file_public_access] Searching for {file_name}")
 
     # Search for the file
-    escaped_name = file_name.replace("'", "\\'")
+    escaped_name = escape_drive_query_value(file_name)
     query = f"name = '{escaped_name}'"
 
     list_params: Dict[str, Any] = {

@@ -21,6 +21,9 @@ Get presentation metadata: title, slide count, and slide object IDs.
 | user_google_email | string | yes | | |
 | presentation_id | string | yes | | |
 | include_speaker_notes | boolean | no | false | Also report each slide's speaker notes shape ID and current notes text |
+| include_geometry | boolean | no | false | Also list each slide's elements with transform and size in EMU, to match an existing deck's margins |
+| include_styles | boolean | no | false | Also list each slide's elements with text styling (see `get_page`) |
+| raw | boolean | no | false | Return the full Presentation resource as JSON (can be large). Overrides the other flags |
 
 ### get_page
 Get details about a specific slide, including its elements and layout.
@@ -30,6 +33,9 @@ Get details about a specific slide, including its elements and layout.
 | user_google_email | string | yes | | |
 | presentation_id | string | yes | | |
 | page_object_id | string | yes | | |
+| include_geometry | boolean | no | false | Report each element's transform and intrinsic size in EMU, plus table column widths, row heights, and cell text. The only way to discover a deck's margins and content width |
+| include_styles | boolean | no | false | Report explicit text styling per paragraph and run, placeholder linkage, autofit, fill, and outline. Useful for proofing |
+| raw | boolean | no | false | Return the full Page resource as JSON. Overrides the other flags |
 
 ### render_page_to_image
 Render a slide (or any page, including a notes page) to a PNG and return it as image content, so you can look at the slide's layout and visuals.
@@ -136,6 +142,7 @@ List all comments on a presentation.
 |-----------|------|----------|---------|-------|
 | user_google_email | string | yes | | |
 | presentation_id | string | yes | | |
+| max_comments | integer | no | 100 | Cap on comments returned; must be at least 1. Default comes from `WORKSPACE_MCP_COMMENTS_MAX`; unset, invalid, or non-positive values fall back to 100 |
 
 ### manage_presentation_comment
 Create, reply to, or resolve a comment.
