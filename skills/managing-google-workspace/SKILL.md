@@ -182,7 +182,7 @@ For parameters: [references/sheets.md](references/sheets.md)
 |------|------|
 | Get presentation | `get_presentation` |
 | Get specific slide | `get_page` |
-| Get slide thumbnail | `get_page_thumbnail` |
+| Look at a slide (render to image) | `render_page_to_image` |
 | Create presentation | `create_presentation` |
 | Batch update | `batch_update_presentation` |
 | Speaker notes | `get_presentation` (`include_speaker_notes`) + `batch_update_presentation` |
