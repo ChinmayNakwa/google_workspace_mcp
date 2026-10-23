@@ -863,7 +863,9 @@ ATTACHED_MESSAGE_HEADER_LIMIT = 1000
 
 
 def _render_attached_messages(
-    payload: dict, body_format: Literal["text", "html"] = "text"
+    payload: dict,
+    body_format: Literal["text", "html"] = "text",
+    include_headers: bool = True,
 ) -> str:
     """Render emails wrapped inside this one (message/rfc822 parts) as text.
 
@@ -876,7 +878,7 @@ def _render_attached_messages(
     """
     blocks: List[str] = []
     counts = {"shown": 0, "over_limit": 0, "too_deep": 0}
-    names = ["From", "To", "Cc", "Subject", "Date"]
+    names = ["From", "To", "Cc", "Subject", "Date"] if include_headers else []
 
     # Depth counts attached messages only; ordinary MIME nesting uses the stack.
     pending = [(child, 1) for child in reversed(payload.get("parts") or [])]
@@ -1923,9 +1925,9 @@ async def get_gmail_message_content(
         format (Literal["full", "metadata"]): Message format. "full" (default) includes
             the body and attachments, "metadata" only headers.
         include_headers (bool): When False, omit the Subject/From/To/Date header
-            summary, and with full=True name the export after the message ID, so
-            no header text reaches the response. Requires format='full'. Defaults
-            to True.
+            summary (attached messages' too), and with full=True name the export
+            after the message ID. Requires format='full'; body_format='raw' is only
+            allowed when the raw message is exported to a file.
 
     Returns:
         str: The message details including subject, sender, date, Message-ID, recipients
@@ -1943,6 +1945,15 @@ async def get_gmail_message_content(
         raise UserInputError("full=True requires format='full'.")
     if format == "metadata" and not include_headers:
         raise UserInputError("include_headers=False requires format='full'.")
+    if (
+        not include_headers
+        and body_format == "raw"
+        and (not full or (is_stateless_mode() and not gcs_files_enabled()))
+    ):
+        raise UserInputError(
+            "include_headers=False cannot hide the headers in inline raw MIME; "
+            "use body_format='text' or a full=True file export."
+        )
 
     # Fetch message metadata first to get headers
     message_metadata = await asyncio.to_thread(
@@ -2015,7 +2026,7 @@ async def get_gmail_message_content(
 
     content_lines.append(
         f"\n--- BODY ---\n{body_data or '[No text/plain body found]'}"
-        f"{_render_attached_messages(payload, body_format)}"
+        f"{_render_attached_messages(payload, body_format, include_headers)}"
     )
 
     # Add attachment information if present

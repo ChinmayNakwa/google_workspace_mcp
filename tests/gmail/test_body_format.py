@@ -1099,6 +1099,9 @@ async def test_full_export_long_subject_does_not_crash(stdio_storage):
 
 
 SPAM_SUBJECT = "\U0001f525\U0001f525 WIN BIG \U0001f525\U0001f525"
+SPAM_RAW = (
+    f"Subject: {SPAM_SUBJECT}\r\nFrom: Spammer <spam@example.com>\r\n\r\nspam body"
+)
 
 
 def _spam_service(message_id: str):
@@ -1109,15 +1112,17 @@ def _spam_service(message_id: str):
             (message_id, "full"): _message_response(
                 message_id, text="spam body", headers=headers
             ),
-            (message_id, "raw"): {"raw": _encode("spam body")},
+            (message_id, "raw"): {"raw": _encode(SPAM_RAW)},
         }
     )
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("body_format", ["text", "raw"])
+@pytest.mark.parametrize(
+    ("body_format", "saved"), [("text", "spam body"), ("raw", SPAM_RAW)]
+)
 async def test_full_export_without_headers_keeps_subject_out(
-    stdio_storage, body_format
+    stdio_storage, body_format, saved
 ):
     result = await _unwrap(get_gmail_message_content)(
         service=_spam_service("spam-1"),
@@ -1134,23 +1139,36 @@ async def test_full_export_without_headers_keeps_subject_out(
     saved_path = _saved_path(result)
     assert Path(saved_path).name.startswith("spam-1_")
     with open(saved_path, "rb") as fh:
-        assert fh.read().decode() == "spam body"
+        assert fh.read().decode() == saved
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("body_format", "marker"), [("text", "--- BODY ---"), ("raw", "--- RAW MIME ---")]
-)
-async def test_inline_content_without_headers_keeps_subject_out(body_format, marker):
+async def test_inline_content_without_headers_keeps_subject_out():
     result = await _unwrap(get_gmail_message_content)(
         service=_spam_service("spam-2"),
         message_id="spam-2",
         user_google_email="user@example.com",
-        body_format=body_format,
         include_headers=False,
     )
 
+    assert result.startswith("\n--- BODY ---\nspam body")
     assert SPAM_SUBJECT not in result
-    assert "From:" not in result
-    assert marker in result
-    assert "spam body" in result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("full", "stateless"), [(False, False), (True, True)])
+async def test_inline_raw_without_headers_is_rejected(monkeypatch, full, stateless):
+    monkeypatch.setattr(gmail_tools, "is_stateless_mode", lambda: stateless)
+    monkeypatch.setattr(gmail_tools, "gcs_files_enabled", lambda: False)
+    service = _spam_service("spam-3")
+
+    with pytest.raises(UserInputError, match="inline raw MIME"):
+        await _unwrap(get_gmail_message_content)(
+            service=service,
+            message_id="spam-3",
+            user_google_email="user@example.com",
+            body_format="raw",
+            full=full,
+            include_headers=False,
+        )
+    service.users().messages().get.assert_not_called()
