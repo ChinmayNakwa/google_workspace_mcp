@@ -29,6 +29,12 @@ List contacts for the authenticated user.
 | page_size | integer | no | 100 | Max 1000 |
 | page_token | any | no | | Pagination token |
 | sort_order | string | no | | `LAST_MODIFIED_ASCENDING`, `LAST_MODIFIED_DESCENDING`, `FIRST_NAME_ASCENDING`, or `LAST_NAME_ASCENDING` |
+| request_sync_token | boolean | no | false | Start a full sync; the last page ends with `Next sync token` |
+| sync_token | string | no | | List changes since that sync token; deleted contacts show `Deleted: yes` |
+
+Keep every argument unchanged when following `page_token`. `sort_order` is
+rejected when syncing. Sync tokens expire after seven days; an expired token
+returns a message asking for a new full sync.
 
 ### get_contact
 Get detailed information about a specific contact.

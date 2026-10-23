@@ -81,15 +81,18 @@ Creates a new Google Doc with optional initial content.
 ## Text Editing
 
 ### modify_doc_text
-Insert or replace text and/or apply character formatting in a single operation. If `end_index` is not provided with text, text is inserted at `start_index`; provide both to replace a range. Formatting options can be applied with or without changing the text.
+Insert or replace text and/or apply character formatting in a single operation. If `end_index` is not provided with text, text is inserted at `start_index`; provide both to replace a range. Formatting options can be applied with or without changing the text. Pass `heading` instead of `start_index` to edit the section under a heading without computing indices (see Heading mode below).
 
 | Parameter | Type | Required | Default | Notes |
 |-----------|------|----------|---------|-------|
 | user_google_email | string | yes | | |
 | document_id | string | yes | | |
-| start_index | integer | yes | | Docs API start position from `inspect_doc_structure`; `0` is also accepted as an alias for the first writable body position |
+| start_index | integer | no | | Docs API start position from `inspect_doc_structure`; `0` is also accepted as an alias for the first writable body position. Required unless `heading` is set |
 | end_index | integer | no | | End position; omit to insert at start_index |
-| text | string | no | | Text to insert or replace with |
+| text | string | no | | Text to insert or replace with. Rendered as Markdown when `heading` is set |
+| heading | string | no | | Text of a body heading (case-insensitive, must match exactly one). Edits the section below it instead of an index range |
+| heading_level | integer | no | | 1-6; only match a heading of this level |
+| end_of_segment | boolean | no | false | Append at the end of the body; with `heading`, append to the end of that section instead of replacing it |
 | bold | boolean | no | | |
 | italic | boolean | no | | |
 | underline | boolean | no | | |
@@ -350,6 +353,8 @@ Use `list_type='NONE'` in `create_bullet_list` to remove existing list formattin
 **Structural inspection workflow**: For tables: (1) call `inspect_doc_structure` to get `total_length`, (2) use that as the insertion index for `create_table_with_data`, (3) call `debug_table_structure` to verify the result. Never guess insertion indices.
 
 **Formatting without changing text**: Call `modify_doc_text` with `start_index` and `end_index` but omit `text` to apply formatting (bold, italic, color, etc.) to existing content.
+
+**Heading mode**: `modify_doc_text` with `heading="Status"` (optionally `heading_level`) resolves the section under that heading in one call: from the end of the heading paragraph to the next heading of equal or shallower level (or the end of the body). The heading itself is kept. `text` is rendered as Markdown and replaces the section's content; add `end_of_segment=true` to append to the section instead; formatting parameters without `text` apply to the whole section. A heading that matches more than once is refused; narrow it with `heading_level` or edit by index. Only body headings are addressable (not headings inside tables, footnotes, headers or footers); a multi-tab doc needs `tab_id`. Sections containing footnote references can be appended to but not replaced.
 
 **Choose the reader by output**: `get_doc_as_markdown` preserves formatting and can include comments. `get_doc_content` defaults to index-aligned text for editing; set `preserve_context=True` for readable link/chip targets and document segments. It also supports non-Google-Docs files.
 
