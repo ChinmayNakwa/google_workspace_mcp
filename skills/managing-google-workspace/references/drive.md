@@ -62,6 +62,9 @@ Retrieve file content as text.
 Content handling:
 - Google Docs/Sheets/Slides: exported as text/CSV
 - Office files (.docx/.xlsx/.pptx): parsed to extract readable text
+- PDFs: text extracted when possible; scanned PDFs return a download hint
+- Images (PNG, JPEG, GIF, WebP): metadata header as text, plus the image itself as MCP image content
+- SVG, BMP, TIFF: returned as base64 text after the header
 - Other files: downloaded, UTF-8 decoded if possible
 
 ### get_drive_file_download_url

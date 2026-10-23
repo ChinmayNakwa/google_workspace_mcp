@@ -22,6 +22,7 @@ from fastmcp.tools import ToolResult
 from mcp.types import (
     BlobResourceContents,
     EmbeddedResource,
+    ImageContent,
     TextContent,
     ToolAnnotations,
 )
@@ -39,10 +40,12 @@ from core.gcs_attachment_storage import gcs_files_enabled
 from core.utils import (
     GOOGLE_API_WRITE_RETRIES,
     IMAGE_MIME_TYPES,
+    INLINE_IMAGE_MIME_TYPES,
     hide_local_file_args,
     hide_remote_only_args,
     local_file_access_enabled,
     encode_image_content,
+    image_content_from_bytes,
     OfficeXmlExtractionError,
     OfficeXmlTooLargeError,
     UserInputError,
@@ -334,7 +337,9 @@ async def get_drive_file_content(
       extract readable text.
     • PDFs → text extracted with pypdf when possible; scanned/image-only PDFs
       fall back to a download hint.
-    • Images → returned as base64 with MIME metadata for multimodal clients.
+    • Images (PNG, JPEG, GIF, WebP) → returned as MCP image content after the
+      metadata header; other image types (SVG, BMP, TIFF) are still returned
+      as base64 text.
     • Any other file → downloaded; tries UTF-8 decode, else notes binary.
 
     Args:
@@ -342,7 +347,8 @@ async def get_drive_file_content(
         file_id: Drive file ID.
 
     Returns:
-        str: The file content as plain text with metadata header.
+        str: The file content as plain text with metadata header. For images, a
+        ToolResult with that text followed by the image as image content.
     """
     logger.info(f"[get_drive_file_content] Invoked. File ID: '{file_id}'")
 
@@ -391,6 +397,7 @@ async def get_drive_file_content(
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     }
 
+    image_content: Optional[ImageContent] = None
     if mime_type in office_mime_types:
         # Offload Office XML extraction to a thread to avoid blocking the event loop
         try:
@@ -427,6 +434,11 @@ async def get_drive_file_content(
                 f"- the file may be scanned/image-only. "
                 f"Use get_drive_file_download_url to get a direct download link instead.]"
             )
+    elif mime_type in INLINE_IMAGE_MIME_TYPES:
+        image_content = image_content_from_bytes(file_content_bytes, mime_type)
+        body_text = (
+            f"[Image attached as image content - {len(file_content_bytes)} bytes]"
+        )
     elif mime_type in IMAGE_MIME_TYPES:
         body_text = encode_image_content(file_content_bytes, mime_type)
     else:
@@ -444,6 +456,14 @@ async def get_drive_file_content(
         f'File: "{file_name}" (ID: {file_id}, Type: {mime_type})\n'
         f"Link: {web_view_link}\n\n--- CONTENT ---\n"
     )
+    if image_content is not None:
+        # structured_content mirrors the plain-string result so clients that
+        # validate against the tool's output schema still get a string.
+        text = header + body_text
+        return ToolResult(
+            content=[TextContent(type="text", text=text), image_content],
+            structured_content={"result": text},
+        )
     return header + body_text
 
 

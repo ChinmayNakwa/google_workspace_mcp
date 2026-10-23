@@ -21,6 +21,7 @@ from defusedxml import DefusedXmlException, ElementTree as ET
 
 from fastmcp.exceptions import ToolError
 from googleapiclient.errors import HttpError
+from mcp.types import ImageContent
 from .api_enablement import get_api_enablement_message
 from auth.google_auth import GoogleAuthenticationError
 from auth.oauth_config import (
@@ -1033,6 +1034,12 @@ IMAGE_MIME_TYPES = {
     "image/svg+xml",
 }
 
+# Image types multimodal model APIs accept in image blocks, so these are
+# returned as MCP image content. SVG is text, and BMP and TIFF are rejected by
+# most model APIs, so those three stay on the base64-text path until a
+# follow-up handles them (SVG as UTF-8 text is a separate ticket).
+INLINE_IMAGE_MIME_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
+
 
 def extract_pdf_text(file_bytes: bytes) -> Optional[str]:
     """
@@ -1077,6 +1084,35 @@ def encode_image_content(file_bytes: bytes, mime_type: str) -> str:
         )
     encoded = base64.b64encode(file_bytes).decode("ascii")
     return f"[base64_image:{mime_type}]{encoded}"
+
+
+def image_content_from_bytes(file_bytes: bytes, mime_type: str) -> ImageContent:
+    """
+    Wrap image bytes as an MCP ImageContent block.
+
+    Returning images as typed content lets multimodal clients bill and render
+    them as images, instead of tokenising a base64 string as text.
+
+    Args:
+        file_bytes: The image file content as bytes.
+        mime_type: The MIME type of the image (must start with "image/").
+
+    Returns:
+        ImageContent: The image, base64-encoded, with its MIME type.
+
+    Raises:
+        ValueError: If mime_type is not an image MIME type.
+    """
+    if not mime_type.startswith("image/"):
+        raise ValueError(
+            f"Expected image/* MIME type, got '{mime_type}'. "
+            "Only image content can be returned as an image block."
+        )
+    return ImageContent(
+        type="image",
+        data=base64.b64encode(file_bytes).decode("ascii"),
+        mimeType=mime_type,
+    )
 
 
 _URL_QUERY_RE = re.compile(r"\?.*?(?=\s+returned(?:\s|$)|[>\"']|$)")

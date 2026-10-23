@@ -1,11 +1,19 @@
-"""Tests for extract_pdf_text and encode_image_content in core.utils."""
+"""Tests for PDF and image helpers in core.utils."""
 
 import base64
 import io
 import pytest
 
 from tests.helpers import _make_minimal_pdf
-from core.utils import IMAGE_MIME_TYPES, encode_image_content, extract_pdf_text
+from mcp.types import ImageContent
+
+from core.utils import (
+    IMAGE_MIME_TYPES,
+    INLINE_IMAGE_MIME_TYPES,
+    encode_image_content,
+    extract_pdf_text,
+    image_content_from_bytes,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -69,6 +77,28 @@ def test_encode_image_content_rejects_non_image_mime():
 
 
 # ---------------------------------------------------------------------------
+# image_content_from_bytes
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("mime_type", sorted(IMAGE_MIME_TYPES))
+def test_image_content_from_bytes_round_trips(mime_type):
+    raw = b"\x89PNG\r\n\x1a\n" + bytes(range(256))
+    result = image_content_from_bytes(raw, mime_type)
+    assert isinstance(result, ImageContent)
+    assert result.type == "image"
+    assert result.mime_type == mime_type
+    assert base64.b64decode(result.data) == raw
+
+
+def test_image_content_from_bytes_rejects_non_image_mime():
+    with pytest.raises(ValueError) as exc_info:
+        image_content_from_bytes(b"some content", "application/pdf")
+    assert "Expected image/* MIME type" in str(exc_info.value)
+    assert "application/pdf" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
 # IMAGE_MIME_TYPES constant
 # ---------------------------------------------------------------------------
 
@@ -76,3 +106,13 @@ def test_encode_image_content_rejects_non_image_mime():
 def test_image_mime_types_contains_common():
     for mt in ("image/png", "image/jpeg", "image/gif", "image/webp"):
         assert mt in IMAGE_MIME_TYPES
+
+
+def test_inline_image_mime_types_is_model_api_allowlist():
+    assert INLINE_IMAGE_MIME_TYPES == {
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "image/webp",
+    }
+    assert INLINE_IMAGE_MIME_TYPES <= IMAGE_MIME_TYPES
