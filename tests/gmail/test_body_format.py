@@ -405,8 +405,13 @@ class TestExtractMessageBodies:
                 "日本語",
             ),
             ("text/plain; charset=windows-1252", b"caf\xe9\x81", "café"),
+            ("text/plain; charset=windows-1252", "Café".encode(), "Café"),
+            ("text/plain; charset=iso-8859-1", "“naïve”".encode("cp1252"), "“naïve”"),
             ("text/plain; charset=us-ascii", "Café".encode(), "Café"),
+            ("text/plain; charset=us-ascii", "“Café”".encode("cp1252"), "“Café”"),
             ("text/plain; charset=x-unknown", "Café".encode(), "Café"),
+            ("text/plain; charset=x-unknown", b"caf\xe9", "caf"),
+            ("text/plain; charset=gbk", "一".encode("gbk"), "一"),
             ("text/plain", "Café".encode(), "Café"),
         ],
     )

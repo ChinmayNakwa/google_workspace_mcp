@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import codecs
+import contextlib
 import logging
 import re
 import secrets
@@ -791,11 +793,12 @@ def decode_part_body(part: Mapping[str, Any]) -> str:
     for header in part.get("headers", []):
         headers[header["name"]] = header["value"]
     charset = headers.get_content_charset() or "utf-8"
-    for codec, errors in (
-        (charset, "strict"),
-        ("utf-8", "strict"),
-        (charset, "ignore"),
-    ):
+    attempts = [(charset, "strict"), ("utf-8", "strict"), (charset, "ignore")]
+    # WHATWG reads these labels as windows-1252, and they often mislabel UTF-8.
+    with contextlib.suppress(LookupError):
+        if codecs.lookup(charset).name in {"ascii", "cp1252", "iso8859-1"}:
+            attempts = [("utf-8", "strict"), ("cp1252", "strict"), ("cp1252", "ignore")]
+    for codec, errors in attempts:
         try:
             return raw.decode(codec, errors)
         except (LookupError, UnicodeError):
