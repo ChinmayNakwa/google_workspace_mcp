@@ -29,6 +29,9 @@ Reads a Google Doc and returns it as Markdown, preserving headings, bold/italic/
 | include_comments | boolean | no | true | Include comments in output |
 | comment_mode | string | no | inline | `inline` (footnote-style at anchor), `appendix` (grouped at bottom), or `none` |
 | include_resolved | boolean | no | false | Include resolved comments |
+| suggestions_view_mode | string | no | DEFAULT_FOR_CURRENT_ACCESS | `DEFAULT_FOR_CURRENT_ACCESS`, `SUGGESTIONS_INLINE`, `PREVIEW_SUGGESTIONS_ACCEPTED`, or `PREVIEW_WITHOUT_SUGGESTIONS` |
+| tab_id | string | no | | Render only this tab (no child tabs); overrides a URL `?tab=`. Pass `""` to read every tab of such a URL |
+| include_colors | boolean | no | false | Follow text with an explicit RGB foreground color with `[color: #rrggbb]`. Theme colors are not shown |
 
 ### get_doc_content
 Retrieves plain text content of a Google Doc or a Drive file (.docx, etc.). Native Google Docs use the Docs API; Office files are downloaded and text-extracted via Drive API.
@@ -41,6 +44,7 @@ Comments, revision history, exact visual layout, and chip details hidden by the 
 |-----------|------|----------|---------|-------|
 | user_google_email | string | yes | | |
 | document_id | string | yes | | Doc ID or file ID |
+| suggestions_view_mode | string | no | DEFAULT_FOR_CURRENT_ACCESS | `DEFAULT_FOR_CURRENT_ACCESS`, `SUGGESTIONS_INLINE`, `PREVIEW_SUGGESTIONS_ACCEPTED`, or `PREVIEW_WITHOUT_SUGGESTIONS` |
 | tab_id | string | no | | Select a specific Google Docs tab |
 | preserve_context | boolean | no | false | Include readable semantic annotations; output offsets are no longer editing indices |
 
@@ -52,6 +56,9 @@ Searches for Google Docs by name using Drive API (mimeType filter).
 | user_google_email | string | yes | | |
 | query | string | yes | | Search query for doc names |
 | page_size | integer | no | 10 | Max results to return |
+| page_token | string | no | | `nextPageToken` from a previous response |
+| corpora | string | no | | `user`, `domain`, `drive`, or `allDrives`; defaults to `drive` when drive_id is set, else `allDrives` |
+| drive_id | string | no | | Shared drive ID to search |
 
 ### list_docs_in_folder
 Lists Google Docs within a specific Drive folder.
@@ -61,6 +68,7 @@ Lists Google Docs within a specific Drive folder.
 | user_google_email | string | yes | | |
 | folder_id | string | no | root | Drive folder ID |
 | page_size | integer | no | 100 | Max items to return |
+| page_token | string | no | | `nextPageToken` from a previous response |
 
 ---
 
@@ -92,16 +100,22 @@ Insert or replace text and/or apply character formatting in a single operation. 
 | text | string | no | | Text to insert or replace with. Rendered as Markdown when `heading` is set |
 | heading | string | no | | Text of a body heading (case-insensitive, must match exactly one). Edits the section below it instead of an index range |
 | heading_level | integer | no | | 1-6; only match a heading of this level |
-| end_of_segment | boolean | no | false | Append at the end of the body; with `heading`, append to the end of that section instead of replacing it |
+| tab_id | string | no | | Target a specific tab; required with `heading` when the doc has multiple tabs |
+| segment_id | string | no | | Header/footer/footnote segment ID from `inspect_doc_structure`; never guess. Prefer `update_doc_headers_footers` for plain header/footer text |
+| end_of_segment | boolean | no | false | Insert `text` at the end of the body or segment instead of start_index. Not allowed with replacement or formatting. With `heading`, appends to the end of that section instead of replacing it |
 | bold | boolean | no | | |
 | italic | boolean | no | | |
 | underline | boolean | no | | |
 | strikethrough | boolean | no | | |
-| font_size | integer | no | | Size in points |
+| font_size | number | no | | Size in points |
 | font_family | string | no | | e.g. "Arial", "Times New Roman" |
+| font_weight | integer | no | | 100-900 in steps of 100; requires font_family |
 | text_color | string | no | | Hex color `#RRGGBB` |
 | background_color | string | no | | Highlight color `#RRGGBB` |
 | link_url | string | no | | Hyperlink URL (http/https) |
+| clear_link | boolean | no | | Remove hyperlinks from the range; cannot combine with link_url |
+| baseline_offset | string | no | | `NONE`, `SUPERSCRIPT`, or `SUBSCRIPT` |
+| small_caps | boolean | no | | |
 
 ### find_and_replace_doc
 Find and replace text throughout a document (or a specific tab).
@@ -128,17 +142,32 @@ Apply paragraph-level formatting: heading styles (H1-H6), lists (bulleted/number
 | document_id | string | yes | | |
 | start_index | integer | yes | | Docs API start position from `inspect_doc_structure`; `0` is also accepted as an alias for the first writable body position |
 | end_index | integer | yes | | Exclusive end; should cover the entire paragraph |
+| tab_id | string | no | | Target a specific tab |
+| segment_id | string | no | | Header/footer/footnote segment ID from `inspect_doc_structure` |
 | heading_level | integer | no | | 0 = NORMAL_TEXT, 1-6 = H1-H6 |
+| named_style_type | string | no | | `NORMAL_TEXT`, `TITLE`, `SUBTITLE`, `HEADING_1`-`HEADING_6`. Mutually exclusive with heading_level |
 | alignment | string | no | | `START`, `CENTER`, `END`, `JUSTIFIED` |
+| direction | string | no | | `LEFT_TO_RIGHT` or `RIGHT_TO_LEFT` |
 | line_spacing | number | no | | Multiplier: 1.0 = single, 1.5, 2.0 = double |
+| spacing_mode | string | no | | `NEVER_COLLAPSE` or `COLLAPSE_LISTS` |
 | indent_first_line | number | no | | Points (36 = 0.5 inch) |
 | indent_start | number | no | | Left indent in points |
 | indent_end | number | no | | Right indent in points |
 | space_above | number | no | | Points above paragraph |
 | space_below | number | no | | Points below paragraph |
-| named_style_type | string | no | | `NORMAL_TEXT`, `TITLE`, `SUBTITLE`, `HEADING_1`-`HEADING_6`. Mutually exclusive with heading_level |
-| list_type | string | no | | `UNORDERED` (bullets), `ORDERED` (numbers) |
-| list_nesting_level | integer | no | 0 | Nesting depth 0-8 |
+| keep_lines_together | boolean | no | | Keep all lines of the paragraph on one page |
+| keep_with_next | boolean | no | | Keep on the same page as the next paragraph |
+| avoid_widow_and_orphan | boolean | no | | |
+| page_break_before | boolean | no | | Start the paragraph on a new page |
+| shading_color | string | no | | Paragraph background `#RRGGBB` |
+| border_edges | array | no | | Any of `top`, `bottom`, `left`, `right`, `between`; omit to update all four outer edges |
+| border_color | string | no | black | `#RRGGBB` |
+| border_width | number | no | 1 | Points; must be positive |
+| border_padding | number | no | 4 | Points; non-negative |
+| border_dash | string | no | SOLID | `SOLID`, `DOT`, or `DASH` |
+| list_type | string | no | | `UNORDERED` (bullets), `ORDERED` (numbers), `CHECKBOX`, or `NONE` (remove list formatting; heading/named style changes do not clear it) |
+| list_nesting_level | integer | no | 0 | Nesting depth 0-8; requires list_type other than `NONE` |
+| bullet_preset | string | no | | Explicit Docs `BulletGlyphPreset`, e.g. `BULLET_DISC_CIRCLE_SQUARE`, `NUMBERED_DECIMAL_NESTED`; requires list_type other than `NONE` |
 
 ---
 
@@ -168,6 +197,7 @@ Creates a table pre-populated with data in one operation. Always call `inspect_d
 | table_data | array | yes | | 2D list of strings: `[["H1","H2"],["r1c1","r1c2"]]`. All rows must have the same column count. Use `""` for empty cells, never null |
 | index | integer | yes | | Get from `inspect_doc_structure` `total_length` |
 | bold_headers | boolean | no | true | Bold the first row |
+| header_rows | integer | no | 0 | Leading rows to repeat after each page break; 0 to row count |
 | tab_id | string | no | | Target a specific tab |
 
 ### insert_doc_image
@@ -259,6 +289,7 @@ List all comments on a document.
 |-----------|------|----------|---------|-------|
 | user_google_email | string | yes | | |
 | document_id | string | yes | | |
+| max_comments | integer | no | 100 | Cap on comments returned; must be at least 1. Default comes from `WORKSPACE_MCP_COMMENTS_MAX`; unset, invalid, or non-positive values fall back to 100 |
 
 ### manage_document_comment
 Create, reply to, or resolve a comment.
@@ -284,6 +315,7 @@ Returns document structure metadata: element count, total length, table position
 | document_id | string | yes | | |
 | detailed | boolean | no | false | Return detailed structure info |
 | tab_id | string | no | | Inspect a specific tab (default: main document) |
+| preview_chars | integer | no | 100 | Max characters of paragraph/header/footer text previews; `0` or null for full text (needed to locate a token inside a long paragraph) |
 
 Key output fields:
 - `total_elements` -- number of document elements
@@ -309,6 +341,7 @@ Detailed view of a single table's layout: dimensions, cell positions, current co
 | user_google_email | string | yes | | |
 | document_id | string | yes | | |
 | table_index | integer | no | 0 | 0-based table number (0 = first table) |
+| tab_id | string | no | | Tab containing the table (default: first tab) |
 
 ---
 

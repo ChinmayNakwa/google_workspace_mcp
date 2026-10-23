@@ -564,7 +564,7 @@ def _validate_auto_decline_mode(mode: Optional[str], function_name: str) -> str:
     if mode is None:
         return "declineAllConflictingInvitations"
     if mode not in _VALID_AUTO_DECLINE_MODES:
-        raise ValueError(
+        raise UserInputError(
             f"[{function_name}] Invalid auto_decline_mode '{mode}'. "
             f"Must be one of: {', '.join(sorted(_VALID_AUTO_DECLINE_MODES))}"
         )
@@ -685,7 +685,7 @@ def _build_time_boundary(time_value: str, timezone: Optional[str]) -> Dict[str, 
     try:
         parsed = datetime.datetime.fromisoformat(re.sub(r"[zZ]$", "+00:00", time_value))
     except ValueError as exc:
-        raise ValueError(
+        raise UserInputError(
             f"Invalid RFC3339 timestamp {time_value!r}. Use a value such as "
             "'2026-09-17T11:35:00' or '2026-09-17T11:35:00-07:00'."
         ) from exc
@@ -701,7 +701,7 @@ def _build_time_boundary(time_value: str, timezone: Optional[str]) -> Dict[str, 
     try:
         zone = ZoneInfo(timezone)
     except (ZoneInfoNotFoundError, ValueError) as exc:
-        raise ValueError(
+        raise UserInputError(
             f"Unrecognized IANA timezone {timezone!r}. Use a zone name such as "
             "'America/New_York' or 'Europe/Amsterdam'."
         ) from exc
@@ -796,7 +796,7 @@ def _resolve_conference_data(
         [conference_provider, conference_uri, conference_passcode, conference_id]
     )
     if conference_data is not None and helper_used:
-        raise ValueError(
+        raise UserInputError(
             "Provide either conference_data (raw payload) or the "
             "conference_provider/conference_uri helper params, not both."
         )
@@ -806,7 +806,7 @@ def _resolve_conference_data(
         provider = (conference_provider or "").strip()
         uri = (conference_uri or "").strip()
         if not (provider and uri):
-            raise ValueError(
+            raise UserInputError(
                 "conference_provider and conference_uri are both required to "
                 "attach a third-party conference."
             )
@@ -815,7 +815,7 @@ def _resolve_conference_data(
         )
 
     if resolved is not None and add_google_meet:
-        raise ValueError(
+        raise UserInputError(
             "Cannot attach a third-party conference and add_google_meet on the "
             "same event; choose one."
         )
@@ -903,10 +903,6 @@ async def _build_attachment_entries(
     return entries
 
 
-class AttendeeValidationError(ValueError, UserInputError):
-    """Invalid attendee input, preserving ValueError compatibility for callers."""
-
-
 def _normalize_attendees(
     attendees: Optional[List[Union[str, Dict[str, Any]]]],
 ) -> Optional[List[Dict[str, Any]]]:
@@ -921,7 +917,7 @@ def _normalize_attendees(
     Returns list of attendee dicts with at minimum 'email' key.
 
     Raises:
-        AttendeeValidationError: If an attendee is neither an email string nor a
+        UserInputError: If an attendee is neither an email string nor a
             dict with an 'email' key, so it is never silently left off the event.
     """
     if attendees is None:
@@ -934,7 +930,7 @@ def _normalize_attendees(
         elif isinstance(att, dict) and "email" in att:
             normalized.append(att)
         else:
-            raise AttendeeValidationError(
+            raise UserInputError(
                 "Each attendee must be an email string or an object with an "
                 f"'email' key; got {type(att).__name__}"
             )
@@ -960,7 +956,7 @@ def _status_event_time_entry(
         re.search(r"[+-]\d{2}:\d{2}$", time_str)
     )
     if not has_explicit_offset and not timezone:
-        raise ValueError(
+        raise UserInputError(
             f"{event_label} events require either a timezone parameter or a "
             "start/end timestamp with an explicit UTC offset."
         )
@@ -978,7 +974,7 @@ def _validate_chat_status(
     if chat_status is None:
         return None
     if chat_status not in _VALID_FOCUS_TIME_CHAT_STATUSES:
-        raise ValueError(
+        raise UserInputError(
             f"[{function_name}] Invalid chat_status '{chat_status}'. "
             f"Must be one of: {', '.join(sorted(_VALID_FOCUS_TIME_CHAT_STATUSES))}"
         )

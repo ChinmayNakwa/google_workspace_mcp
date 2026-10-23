@@ -509,7 +509,7 @@ def _derive_reply_all_recipients(
         )
 
     derived_cc = cc
-    if not derived_cc:
+    if derived_cc is None:
         seen = {addr.lower() for _n, addr in getaddresses([derived_to or ""]) if addr}
         seen |= excluded
         others = []

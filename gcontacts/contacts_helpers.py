@@ -117,12 +117,12 @@ def _parse_birthday(s: str) -> Dict[str, Any]:
         else:
             raise ValueError
     except ValueError:
-        raise ValueError(
+        raise UserInputError(
             f"Invalid birthday format '{s}'. Use 'YYYY-MM-DD' or 'MM-DD'."
         ) from None
 
     if not 1 <= month <= 12 or not 1 <= day <= 31:
-        raise ValueError(
+        raise UserInputError(
             f"Invalid birthday '{s}': month must be 1-12 and day must be 1-31."
         )
 
@@ -132,7 +132,9 @@ def _parse_birthday(s: str) -> Dict[str, Any]:
     try:
         datetime.date(year if year is not None else 2000, month, day)
     except ValueError:
-        raise ValueError(f"Invalid birthday '{s}': not a real calendar date.") from None
+        raise UserInputError(
+            f"Invalid birthday '{s}': not a real calendar date."
+        ) from None
 
     date = {"month": month, "day": day}
     if year is not None:

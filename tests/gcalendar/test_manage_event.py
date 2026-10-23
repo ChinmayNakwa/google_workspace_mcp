@@ -201,19 +201,19 @@ def test_resolve_conference_data_returns_none_when_nothing_requested():
 
 
 def test_resolve_conference_data_rejects_helper_without_uri():
-    with pytest.raises(ValueError):
+    with pytest.raises(UserInputError):
         _resolve_conference_data(None, "zoom", None, None, None, None)
 
 
 def test_resolve_conference_data_rejects_raw_and_helper_combined():
-    with pytest.raises(ValueError):
+    with pytest.raises(UserInputError):
         _resolve_conference_data(
             {"a": 1}, "zoom", "https://zoom.us/j/1", None, None, None
         )
 
 
 def test_resolve_conference_data_rejects_conflict_with_google_meet():
-    with pytest.raises(ValueError):
+    with pytest.raises(UserInputError):
         _resolve_conference_data(
             None, "zoom", "https://zoom.us/j/1", None, None, add_google_meet=True
         )
@@ -292,7 +292,7 @@ async def test_modify_event_attaches_conference_data():
 @pytest.mark.asyncio
 async def test_manage_event_rejects_conference_helper_without_uri():
     fn = _unwrap(manage_event)
-    with pytest.raises(ValueError, match="conference_provider and conference_uri"):
+    with pytest.raises(UserInputError, match="conference_provider and conference_uri"):
         await fn(
             service=Mock(),
             user_google_email="user@example.com",
@@ -308,7 +308,7 @@ async def test_manage_event_rejects_conference_helper_without_uri():
 @pytest.mark.parametrize("action", ["create", "update", "delete", "rsvp"])
 async def test_manage_event_rejects_invalid_send_updates(action):
     fn = _unwrap(manage_event)
-    with pytest.raises(ValueError, match="Invalid send_updates 'invalid'"):
+    with pytest.raises(UserInputError, match="Invalid send_updates 'invalid'"):
         await fn(
             service=Mock(),
             user_google_email="user@example.com",
@@ -435,7 +435,7 @@ async def test_manage_event_create_action_routes_attendee_objects():
 async def test_create_event_rejects_attendee_without_email():
     mock_service = _create_mock_service()
 
-    with pytest.raises(ValueError, match="'email' key"):
+    with pytest.raises(UserInputError, match="'email' key"):
         await _create_event_impl(
             service=mock_service,
             user_google_email="user@example.com",
@@ -450,7 +450,7 @@ async def test_create_event_rejects_attendee_without_email():
 async def test_modify_event_rejects_attendee_without_email():
     mock_service = _create_mock_service()
 
-    with pytest.raises(ValueError, match="'email' key"):
+    with pytest.raises(UserInputError, match="'email' key"):
         await _modify_event_impl(
             service=mock_service,
             user_google_email="user@example.com",
@@ -470,7 +470,7 @@ async def test_manage_event_attendee_errors_are_user_input(action, invalid_atten
         _unwrap(manage_event)
     )
 
-    with pytest.raises(UserInputError, match="'email' key") as exc_info:
+    with pytest.raises(UserInputError, match="'email' key"):
         await fn(
             service=mock_service,
             user_google_email="user@example.com",
@@ -482,26 +482,22 @@ async def test_manage_event_attendee_errors_are_user_input(action, invalid_atten
             attendees=["kept@example.com", invalid_attendee],
         )
 
-    assert isinstance(exc_info.value, ValueError)
     assert mock_service.mock_calls == []
 
 
 @pytest.mark.asyncio
-async def test_manage_event_unrelated_value_error_keeps_existing_handling():
+async def test_manage_event_validation_errors_are_user_input():
     fn = handle_http_errors("manage_event", service_type="calendar")(
         _unwrap(manage_event)
     )
 
-    with pytest.raises(Exception, match="An unexpected error occurred") as exc_info:
+    with pytest.raises(UserInputError, match="Invalid send_updates"):
         await fn(
             service=Mock(),
             user_google_email="user@example.com",
             action="create",
             send_updates="invalid",
         )
-
-    assert isinstance(exc_info.value.__cause__, ValueError)
-    assert not isinstance(exc_info.value.__cause__, UserInputError)
 
 
 @pytest.mark.parametrize(
