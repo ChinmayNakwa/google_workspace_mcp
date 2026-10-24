@@ -7,8 +7,8 @@ Converts Google Docs API JSON responses to clean Markdown, preserving:
 - Ordered and unordered lists with nesting
 - Checklists with checked/unchecked state
 - Tables with header row separators
-- Smart chips: person (@mentions), rich links, dates, inline images,
-  footnotes, horizontal rules, auto-text (page numbers), equations
+- Smart chips: person (@mentions), rich links, dates, dropdowns, inline
+  images, footnotes, horizontal rules, auto-text (page numbers), equations
 - Document tabs (multi-tab and nested child tabs)
 - Explicit RGB text color as a trailing ``[color: #rrggbb]`` note (opt-in)
 """
@@ -247,6 +247,9 @@ def _convert_paragraph_text(
             parts.append(_convert_rich_link_chip(elem["richLink"]))
         elif "dateElement" in elem:
             parts.append(_convert_date_chip(elem["dateElement"]))
+        elif "dropdown" in elem:
+            props = elem["dropdown"].get("dropdownProperties", {})
+            parts.append(props.get("displayValue", ""))
         elif "inlineObjectElement" in elem:
             parts.append(
                 _convert_inline_object(elem["inlineObjectElement"], inline_objects)

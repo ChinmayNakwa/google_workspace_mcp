@@ -884,6 +884,79 @@ class TestSmartChips:
         md = convert_doc_to_markdown(doc)
         assert "2026-01-15" in md
 
+    def test_dropdown_chip_renders_selected_value_in_table(self):
+        def cell(*elements):
+            return {"content": [{"paragraph": {"elements": list(elements)}}]}
+
+        def dropdown(display_value):
+            return {
+                "dropdown": {
+                    "dropdownId": "kix.dd1",
+                    "dropdownProperties": {
+                        "dropdownDefinitionId": "kix.def1",
+                        "selectedOptionId": "dropdownItem.open",
+                        "displayValue": display_value,
+                    },
+                }
+            }
+
+        def text(content):
+            return {"textRun": {"content": content}}
+
+        doc = {
+            "title": "Test",
+            "body": {
+                "content": [
+                    {
+                        "table": {
+                            "tableRows": [
+                                {
+                                    "tableCells": [
+                                        cell(text("Task\n")),
+                                        cell(text("Status\n")),
+                                    ]
+                                },
+                                {
+                                    "tableCells": [
+                                        cell(text("Fix access\n")),
+                                        cell(dropdown("Completed"), text("\n")),
+                                    ]
+                                },
+                                {
+                                    "tableCells": [
+                                        cell(text("Try venue\n")),
+                                        cell(dropdown("Open | Blocked"), text("\n")),
+                                    ]
+                                },
+                            ]
+                        }
+                    }
+                ]
+            },
+        }
+        md = convert_doc_to_markdown(doc)
+        assert "| Fix access | Completed |" in md
+        assert "| Try venue | Open \\| Blocked |" in md
+
+    def test_dropdown_chip_without_value(self):
+        doc = {
+            "title": "Test",
+            "body": {
+                "content": [
+                    {
+                        "paragraph": {
+                            "elements": [
+                                {"textRun": {"content": "Status: "}},
+                                {"dropdown": {"dropdownProperties": {}}},
+                                {"textRun": {"content": "\n"}},
+                            ]
+                        }
+                    }
+                ]
+            },
+        }
+        assert convert_doc_to_markdown(doc) == "Status:\n"
+
     def test_inline_image(self):
         doc = {
             "title": "Test",
