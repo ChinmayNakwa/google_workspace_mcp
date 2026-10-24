@@ -1254,7 +1254,7 @@ _MARGIN_BLOCK_TAGS = frozenset(
 _END_TAG_RE = re.compile(r"</([a-zA-Z][a-zA-Z0-9]*)\s*>\s*")
 _TRAILING_BREAK_RE = re.compile(r"<[bh]r\b[^<>]*>\s*\Z", re.IGNORECASE)
 _RESTYLED_MARGIN_RE = re.compile(
-    rf"<style\b|<(?:{'|'.join(sorted(_MARGIN_BLOCK_TAGS))})\b[^<>]*margin",
+    rf"<style\b[^<>]*>[^<]*margin|<(?:{'|'.join(sorted(_MARGIN_BLOCK_TAGS))})\b[^<>]*margin",
     re.IGNORECASE,
 )
 
