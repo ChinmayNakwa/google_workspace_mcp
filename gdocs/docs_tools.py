@@ -1501,6 +1501,9 @@ async def batch_update_doc(
                          the writable request for the tableHeader state reported
                          in TableRowStyle.
       insert_page_break- optional: index (int), end_of_segment, tab_id
+      insert_person    - required: email (str)
+                         optional: index (int), end_of_segment, tab_id, segment_id
+                         Inserts an @mention person smart chip.
       insert_section_break
                        - optional: index (int), end_of_segment, section_type
                                    ('CONTINUOUS'|'NEXT_PAGE')
