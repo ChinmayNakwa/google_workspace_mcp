@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import binascii
 import codecs
 import contextlib
 import itertools
@@ -368,9 +369,14 @@ async def _fetch_body_data(
     except FileTooLargeError as error:
         logger.warning(f"Skipping message body of {message_id}: {error}")
         return str(error)
-    if not response.get("data"):
-        return f"Message body {attachment_id} came back empty"
-    body["data"] = response["data"]
+    data = response.get("data") or ""
+    try:
+        decoded = _decode_base64url(data)
+    except binascii.Error:
+        decoded = b""
+    if not decoded:
+        return f"Message body {attachment_id} came back empty or undecodable"
+    body["data"] = data
     return None
 
 
@@ -856,10 +862,14 @@ class _HTMLBlockTextExtractor(HTMLParser):
         return text.strip()
 
 
+def _decode_base64url(data: str) -> bytes:
+    """Decode Gmail base64url data, which may arrive without padding."""
+    return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+
+
 def decode_part_body(part: Mapping[str, Any]) -> str:
     """Decode a Gmail payload part's inline body using its declared charset."""
-    data = part["body"]["data"]
-    raw = base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+    raw = _decode_base64url(part["body"]["data"])
     headers = Message()
     for header in part.get("headers", []):
         headers[header["name"]] = header["value"]

@@ -1634,7 +1634,10 @@ async def test_file_attachments_are_not_fetched_as_bodies():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure", [RuntimeError("boom"), {"size": 0}, {"data": "!"}])
+@pytest.mark.parametrize(
+    "failure",
+    [RuntimeError("boom"), {"size": 0}, {"data": "!"}, {"data": "=="}, {"data": "A"}],
+)
 async def test_failed_body_fetch_keeps_the_other_body(failure):
     service = _stored_body_service(
         _stored_body_parts(), attachment_responses={("msg-1", "att-html"): failure}
@@ -1724,13 +1727,23 @@ async def test_forward_includes_attachment_backed_bodies():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("too_large", [False, True])
-async def test_forward_aborts_when_a_body_cannot_be_fetched(monkeypatch, too_large):
+@pytest.mark.parametrize(
+    "too_large, failure",
+    [
+        (False, RuntimeError("boom")),
+        (True, RuntimeError("boom")),
+        (False, {"data": "=="}),
+        (False, {"data": "A"}),
+    ],
+)
+async def test_forward_aborts_when_a_body_cannot_be_fetched(
+    monkeypatch, too_large, failure
+):
     if too_large:
         monkeypatch.setenv("WORKSPACE_MCP_MAX_FILE_BYTES", "32")
     service = _stored_body_service(
         _stored_body_parts(),
-        attachment_responses={("msg-1", "att-html"): RuntimeError("boom")},
+        attachment_responses={("msg-1", "att-html"): failure},
     )
 
     with pytest.raises(ToolError, match="original message body"):
