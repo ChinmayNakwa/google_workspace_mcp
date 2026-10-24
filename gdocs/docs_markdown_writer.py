@@ -302,6 +302,10 @@ def _emit_table(row_cells, requests, cursor, tab_id):
         requests.append(_build_paragraph_style(start, cursor[0], _NORMAL_TEXT, tab_id))
         return
 
+    if requests and requests[-1] == _build_paragraph_style(
+        start - 1, start, _BLOCK_GAP, tab_id
+    ):
+        requests.pop()
     requests.append(_build_insert_table(start, rows, cols, tab_id))
     requests.append(_build_paragraph_style(start, start + 1, _NORMAL_TEXT, tab_id))
     stride = 1 + 2 * cols

@@ -391,6 +391,19 @@ def test_content_after_table_lands_past_the_populated_table():
     assert after[0]["insertText"]["location"]["index"] == 18
 
 
+def test_block_before_table_drops_gap_over_table_leading_paragraph():
+    for md in ("Para\n\n", "- item\n\n", "```\ncode\n```\n\n", "> quote\n\n"):
+        requests = markdown_to_docs_requests(md + SIMPLE_TABLE_MD)
+        assert _space_below_ranges(requests) == [], md
+
+
+def test_block_before_wide_text_table_keeps_gap():
+    header = "|" + "|".join(f" h{i} " for i in range(21)) + "|"
+    sep = "|" + "|".join("---" for _ in range(21)) + "|"
+    requests = markdown_to_docs_requests(f"Para\n\n{header}\n{sep}")
+    assert _space_below_ranges(requests) == [(5, 6)]
+
+
 def test_table_after_heading_parses_as_table():
     """A table directly under a heading (no blank line) must still emit
     insertTable - the acceptance-test layout that regressed in the field."""
