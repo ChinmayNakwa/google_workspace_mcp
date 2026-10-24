@@ -30,6 +30,7 @@ from gcalendar.calendar_helpers import (
     _resolve_color_id,
     _resolve_conference_data,
     _saved_event_times,
+    _split_recurring_event,
     _status_event_time_entry,
     _validate_auto_decline_mode,
     _validate_chat_status,
@@ -540,6 +541,7 @@ async def _modify_event_impl(
     *,
     start_timezone: Optional[str] = None,
     end_timezone: Optional[str] = None,
+    this_and_following: bool = False,
 ) -> str:
     """Internal implementation for modifying a calendar event."""
     logger.info(
@@ -680,6 +682,19 @@ async def _modify_event_impl(
         message = "No fields provided to modify the event."
         logger.warning(f"[modify_event] {message}")
         raise Exception(message)
+
+    if this_and_following:
+        new_series = await _split_recurring_event(
+            service, calendar_id, event_id, event_body, send_updates
+        )
+        return (
+            f"Successfully modified '{new_series.get('summary', summary)}' from "
+            f"instance {event_id} onward for {user_google_email}. Earlier instances "
+            "keep the original series; this and following instances are now series "
+            f"ID {new_series.get('id')}. "
+            f"Link: {new_series.get('htmlLink', 'No link available')}"
+            + _saved_event_times(new_series)
+        )
 
     # Log the event ID for debugging
     logger.info(
@@ -933,6 +948,7 @@ async def manage_event(
     *,
     start_timezone: Optional[str] = None,
     end_timezone: Optional[str] = None,
+    this_and_following: bool = False,
 ) -> str:
     """
     Manages calendar events. Supports creating, updating, deleting, and RSVP.
@@ -988,6 +1004,11 @@ async def manage_event(
         response (Optional[str]): RSVP response — "accepted", "declined", "tentative", or "needsAction" (rsvp action only).
         rsvp_comment (Optional[str]): Optional message to include with the RSVP response (rsvp action only).
         send_updates (Optional[str]): Notification behavior for create, update, delete, and rsvp — "all" (default), "externalOnly", or "none".
+        this_and_following (bool): Update only. With event_id set to a recurring instance ID,
+            applies the change to that instance and every later one by ending the original
+            series before it and starting a new series there; earlier instances are kept.
+            Updating the series ID instead changes every instance, and moving its start or
+            recurrence drops past instances that no longer match. Defaults to False.
 
     Returns:
         str: Confirmation message with event details.
@@ -1079,6 +1100,7 @@ async def manage_event(
             guests_can_see_other_guests=guests_can_see_other_guests,
             attachments=attachments,
             send_updates=send_updates or "all",
+            this_and_following=this_and_following,
         )
     elif action_lower == "delete":
         if not event_id:

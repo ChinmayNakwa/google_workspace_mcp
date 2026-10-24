@@ -903,6 +903,109 @@ async def _build_attachment_entries(
     return entries
 
 
+_SERIES_SERVER_FIELDS = frozenset(
+    {
+        "created",
+        "creator",
+        "etag",
+        "hangoutLink",
+        "htmlLink",
+        "iCalUID",
+        "id",
+        "organizer",
+        "sequence",
+        "updated",
+    }
+)
+
+
+def _truncate_recurrence(recurrence: List[str], split_at: EventBoundary) -> List[str]:
+    """Return ``recurrence`` with every RRULE ending just before ``split_at``."""
+    if split_at.is_all_day:
+        until = (split_at.local_date - datetime.timedelta(days=1)).strftime("%Y%m%d")
+    else:
+        last_kept = split_at.moment - datetime.timedelta(seconds=1)
+        until = last_kept.astimezone(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    truncated = []
+    for line in recurrence:
+        if line.upper().startswith("RRULE:"):
+            parts = [
+                part
+                for part in line[len("RRULE:") :].split(";")
+                if not part.upper().startswith(("COUNT=", "UNTIL="))
+            ]
+            line = f"RRULE:{';'.join(parts + [f'UNTIL={until}'])}"
+        truncated.append(line)
+    return truncated
+
+
+async def _split_recurring_event(
+    service,
+    calendar_id: str,
+    instance_id: str,
+    changes: Dict[str, Any],
+    send_updates: str,
+) -> Dict[str, Any]:
+    """Apply ``changes`` to a recurring instance and all later ones; return the new series.
+
+    Ends the original series before the instance, then inserts a copy starting at it,
+    restoring the original recurrence if the insert fails.
+    """
+    events = service.events()
+    instance = await asyncio.to_thread(
+        lambda: events.get(calendarId=calendar_id, eventId=instance_id).execute()
+    )
+    series_id = instance.get("recurringEventId")
+    split_at = parse_event_boundary(instance, "originalStartTime")
+    if not series_id or split_at is None or not {"start", "end"} <= instance.keys():
+        raise UserInputError(
+            f"Event '{instance_id}' is not an active instance of a recurring series. "
+            "Pass a recurring instance ID from get_events."
+        )
+    series = await asyncio.to_thread(
+        lambda: events.get(calendarId=calendar_id, eventId=series_id).execute()
+    )
+    first = parse_event_boundary(series, "start")
+    if first and (first.moment or first.local_date) == (
+        split_at.moment or split_at.local_date
+    ):
+        raise UserInputError(
+            f"Event '{instance_id}' is the first instance of its series. Update the "
+            f"series '{series_id}' directly instead."
+        )
+    recurrence = series.get("recurrence", [])
+    if "recurrence" not in changes and any("COUNT=" in r.upper() for r in recurrence):
+        raise UserInputError(
+            "This series ends after a fixed COUNT. Pass recurrence for the new series."
+        )
+
+    new_series = {k: v for k, v in series.items() if k not in _SERIES_SERVER_FIELDS}
+    new_series.update({"start": instance["start"], "end": instance["end"], **changes})
+
+    def set_recurrence(rules: List[str]) -> None:
+        events.patch(
+            calendarId=calendar_id,
+            eventId=series_id,
+            body={"recurrence": rules},
+            sendUpdates=send_updates,
+        ).execute()
+
+    await asyncio.to_thread(set_recurrence, _truncate_recurrence(recurrence, split_at))
+    try:
+        return await asyncio.to_thread(
+            lambda: events.insert(
+                calendarId=calendar_id,
+                body=new_series,
+                supportsAttachments=True,
+                conferenceDataVersion=1,
+                sendUpdates=send_updates,
+            ).execute()
+        )
+    except Exception:
+        await asyncio.to_thread(set_recurrence, recurrence)
+        raise
+
+
 def _normalize_attendees(
     attendees: Optional[List[Union[str, Dict[str, Any]]]],
 ) -> Optional[List[Dict[str, Any]]]:
