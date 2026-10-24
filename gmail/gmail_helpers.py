@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import binascii
 import codecs
 import contextlib
 import itertools
@@ -23,6 +24,7 @@ import httplib2
 from fastmcp.exceptions import ToolError as ToolExecutionError
 from googleapiclient.errors import HttpError
 
+from core.file_limits import FileTooLargeError, ensure_within_file_size_limit
 from core.utils import UserInputError
 from gmail.gmail_web_mime import (
     TextDirection,
@@ -337,6 +339,77 @@ async def _fetch_with_retry(
 
     logger.error(f"[{log_prefix}] Failed to fetch {item_label} {item_id}: {last_error}")
     return item_id, None, last_error
+
+
+async def _fetch_body_data(
+    service, message_id: Optional[str], attachment_id: str, body: Dict[str, Any]
+) -> Optional[str]:
+    """Store an attachment-backed body part's data on ``body``; return why it failed."""
+    try:
+        ensure_within_file_size_limit(
+            body.get("size"), file_id=attachment_id, kind="message body"
+        )
+        _, response, error = await _fetch_with_retry(
+            lambda: (
+                service.users()
+                .messages()
+                .attachments()
+                .get(userId="me", messageId=message_id, id=attachment_id)
+            ),
+            item_id=attachment_id,
+            item_label="message body",
+            log_prefix="fetch_attachment_backed_bodies",
+        )
+        if error is not None:
+            return f"Could not fetch message body {attachment_id}: {error}"
+        response = response or {}
+        ensure_within_file_size_limit(
+            response.get("size"), file_id=attachment_id, kind="message body"
+        )
+    except FileTooLargeError as error:
+        logger.warning(f"Skipping message body of {message_id}: {error}")
+        return str(error)
+    data = response.get("data") or ""
+    try:
+        decoded = _decode_base64url(data)
+    except binascii.Error:
+        decoded = b""
+    if not decoded:
+        return f"Message body {attachment_id} came back empty or undecodable"
+    body["data"] = data
+    return None
+
+
+async def fetch_attachment_backed_bodies(
+    service, messages: Iterable[Mapping[str, Any]]
+) -> List[str]:
+    """Fill in the text/plain and text/html bodies Gmail stores behind an attachmentId.
+
+    Returns why each body that is still missing could not be fetched.
+    """
+    errors: List[str] = []
+    for message in messages:
+        pending = [message.get("payload") or {}]
+        failures: Dict[str, str] = {}
+        wanted = {"text/plain", "text/html"}
+        while pending and wanted:
+            part = pending.pop(0)
+            mime_type = part.get("mimeType", "")
+            body = part.get("body") or {}
+            attachment_id = None if part.get("filename") else body.get("attachmentId")
+            if mime_type in wanted and not body.get("data") and attachment_id:
+                error = await _fetch_body_data(
+                    service, message.get("id"), attachment_id, body
+                )
+                if error:
+                    failures[mime_type] = error
+            if mime_type in wanted and body.get("data"):
+                wanted.discard(mime_type)
+                failures.pop(mime_type, None)
+            if mime_type.startswith("multipart/"):
+                pending.extend(part.get("parts") or [])
+        errors.extend(failures.values())
+    return errors
 
 
 async def send_message_once(service, send_body: Dict[str, Any]) -> Dict[str, Any]:
@@ -789,9 +862,14 @@ class _HTMLBlockTextExtractor(HTMLParser):
         return text.strip()
 
 
+def _decode_base64url(data: str) -> bytes:
+    """Decode Gmail base64url data, which may arrive without padding."""
+    return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+
+
 def decode_part_body(part: Mapping[str, Any]) -> str:
     """Decode a Gmail payload part's inline body using its declared charset."""
-    raw = base64.urlsafe_b64decode(part["body"]["data"])
+    raw = _decode_base64url(part["body"]["data"])
     headers = Message()
     for header in part.get("headers", []):
         headers[header["name"]] = header["value"]

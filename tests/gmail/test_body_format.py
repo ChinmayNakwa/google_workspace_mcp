@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
+from fastmcp.exceptions import ToolError
 
 import gmail.gmail_tools as gmail_tools
 from core.utils import UserInputError
@@ -19,8 +20,10 @@ from gmail.gmail_helpers import (
 from gmail.gmail_tools import (
     _extract_message_bodies,
     _format_body_content,
+    _forward_gmail_message_impl,
     _html_to_text,
     _prepare_gmail_message,
+    draft_gmail_message,
     get_gmail_message_content,
     get_gmail_messages_content_batch,
     get_gmail_thread_content,
@@ -115,9 +118,12 @@ class _FakeBatch:
                 self._callback(request_id, None, exc)
 
 
-def _build_service(*, message_responses=None, thread_responses=None):
+def _build_service(
+    *, message_responses=None, thread_responses=None, attachment_responses=None
+):
     message_responses = message_responses or {}
     thread_responses = thread_responses or {}
+    attachment_responses = attachment_responses or {}
 
     service = Mock()
 
@@ -139,7 +145,17 @@ def _build_service(*, message_responses=None, thread_responses=None):
             request.execute.return_value = response
         return request
 
+    def attachment_get(**kwargs):
+        request = Mock()
+        response = attachment_responses[(kwargs["messageId"], kwargs["id"])]
+        if isinstance(response, Exception):
+            request.execute.side_effect = response
+        else:
+            request.execute.return_value = response
+        return request
+
     service.users().messages().get.side_effect = message_get
+    service.users().messages().attachments().get.side_effect = attachment_get
     service.users().threads().get.side_effect = thread_get
     service.new_batch_http_request.side_effect = lambda callback: _FakeBatch(callback)
     return service
@@ -1463,3 +1479,322 @@ async def test_inline_raw_without_headers_is_rejected(monkeypatch, full, statele
             include_headers=False,
         )
     service.users().messages().get.assert_not_called()
+
+
+def _attachment_data(raw: bytes) -> dict:
+    return {"data": base64.urlsafe_b64encode(raw).decode().rstrip("="), "size": 64}
+
+
+def _stored_part(mime_type: str, attachment_id: str, charset=None, **extra) -> dict:
+    part = {"mimeType": mime_type, "body": {"attachmentId": attachment_id, "size": 64}}
+    if charset:
+        part["headers"] = [
+            {"name": "Content-Type", "value": f"{mime_type}; charset={charset}"}
+        ]
+    return {**part, **extra}
+
+
+def _stored_body_service(parts, attachment_responses=None):
+    message = {
+        "id": "msg-1",
+        "payload": {
+            "headers": _headers(),
+            "mimeType": "multipart/alternative",
+            "parts": parts,
+        },
+    }
+    return _build_service(
+        message_responses={
+            ("msg-1", "metadata"): _metadata_response("msg-1"),
+            ("msg-1", "full"): message,
+        },
+        thread_responses={("thread-1", "full"): {"messages": [message]}},
+        attachment_responses={
+            ("msg-1", "att-text"): _attachment_data("Plain café".encode()),
+            ("msg-1", "att-html"): _attachment_data(
+                "<p>Café “naïve”</p>".encode("cp1252")
+            ),
+            **(attachment_responses or {}),
+        },
+    )
+
+
+def _fetched_attachment_ids(service):
+    attachment_get = service.users().messages().attachments().get
+    return [call.kwargs["id"] for call in attachment_get.call_args_list]
+
+
+def _stored_body_parts():
+    return [
+        _stored_part("text/plain", "att-text"),
+        _stored_part("text/html", "att-html", charset="windows-1252"),
+    ]
+
+
+STORED_BODY_READERS = {
+    "message": (get_gmail_message_content, {"message_id": "msg-1"}),
+    "messages_batch": (get_gmail_messages_content_batch, {"message_ids": ["msg-1"]}),
+    "thread": (get_gmail_thread_content, {"thread_id": "thread-1"}),
+    "threads_batch": (get_gmail_threads_content_batch, {"thread_ids": ["thread-1"]}),
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reader", STORED_BODY_READERS)
+@pytest.mark.parametrize(
+    ("body_format", "expected"),
+    [("text", "Plain café"), ("html", "<p>Café “naïve”</p>")],
+)
+async def test_read_tools_fetch_attachment_backed_bodies(reader, body_format, expected):
+    tool, kwargs = STORED_BODY_READERS[reader]
+    service = _stored_body_service(_stored_body_parts())
+
+    result = await _unwrap(tool)(
+        service=service,
+        user_google_email="user@example.com",
+        body_format=body_format,
+        **kwargs,
+    )
+
+    assert expected in result
+    assert sorted(_fetched_attachment_ids(service)) == ["att-html", "att-text"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("body_format", "expected"),
+    [("text", "Plain café"), ("html", "<p>Café “naïve”</p>")],
+)
+async def test_full_export_fetches_attachment_backed_bodies(
+    stdio_storage, body_format, expected
+):
+    result = await _unwrap(get_gmail_message_content)(
+        service=_stored_body_service(_stored_body_parts()),
+        message_id="msg-1",
+        user_google_email="user@example.com",
+        body_format=body_format,
+        full=True,
+    )
+
+    with open(_saved_path(result), "rb") as fh:
+        assert fh.read().decode() == expected
+
+
+@pytest.mark.asyncio
+async def test_attachment_backed_html_only_body_is_converted_to_text():
+    service = _stored_body_service(
+        [_stored_part("text/html", "att-html", charset="windows-1252")]
+    )
+
+    result = await _unwrap(get_gmail_message_content)(
+        service=service, message_id="msg-1", user_google_email="user@example.com"
+    )
+
+    assert result.endswith("\n--- BODY ---\nCafé “naïve”")
+
+
+@pytest.mark.asyncio
+async def test_inline_body_parts_are_not_refetched():
+    service = _stored_body_service(
+        [
+            {"mimeType": "text/plain", "body": {"data": _encode("Inline text")}},
+            _stored_part("text/html", "att-html", charset="windows-1252"),
+        ]
+    )
+
+    result = await _unwrap(get_gmail_message_content)(
+        service=service,
+        message_id="msg-1",
+        user_google_email="user@example.com",
+        body_format="html",
+    )
+
+    assert result.endswith("\n--- BODY ---\n<p>Café “naïve”</p>")
+    assert _fetched_attachment_ids(service) == ["att-html"]
+
+
+@pytest.mark.asyncio
+async def test_file_attachments_are_not_fetched_as_bodies():
+    service = _stored_body_service(
+        [
+            {"mimeType": "text/plain", "body": {"data": _encode("Body text")}},
+            _stored_part("text/html", "att-html", filename="page.html"),
+        ]
+    )
+
+    result = await _unwrap(get_gmail_message_content)(
+        service=service,
+        message_id="msg-1",
+        user_google_email="user@example.com",
+        body_format="html",
+    )
+
+    assert "\n--- BODY ---\nBody text\n\n--- ATTACHMENTS ---\n1. page.html" in result
+    assert _fetched_attachment_ids(service) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure",
+    [RuntimeError("boom"), {"size": 0}, {"data": "!"}, {"data": "=="}, {"data": "A"}],
+)
+async def test_failed_body_fetch_keeps_the_other_body(failure):
+    service = _stored_body_service(
+        _stored_body_parts(), attachment_responses={("msg-1", "att-html"): failure}
+    )
+
+    result = await _unwrap(get_gmail_message_content)(
+        service=service,
+        message_id="msg-1",
+        user_google_email="user@example.com",
+        body_format="html",
+    )
+
+    assert result.endswith("\n--- BODY ---\nPlain café")
+
+
+@pytest.mark.asyncio
+async def test_body_fetch_respects_max_file_bytes(monkeypatch):
+    monkeypatch.setenv("WORKSPACE_MCP_MAX_FILE_BYTES", "32")
+    service = _stored_body_service(_stored_body_parts())
+
+    await _unwrap(get_gmail_message_content)(
+        service=service, message_id="msg-1", user_google_email="user@example.com"
+    )
+
+    assert _fetched_attachment_ids(service) == []
+
+
+@pytest.mark.asyncio
+async def test_body_fetch_checks_the_response_size_when_none_is_declared(
+    monkeypatch,
+):
+    monkeypatch.setenv("WORKSPACE_MCP_MAX_FILE_BYTES", "32")
+    part = _stored_part("text/plain", "att-text")
+    del part["body"]["size"]
+    service = _stored_body_service([part])
+
+    result = await _unwrap(get_gmail_message_content)(
+        service=service, message_id="msg-1", user_google_email="user@example.com"
+    )
+
+    assert _fetched_attachment_ids(service) == ["att-text"]
+    assert "Plain café" not in result
+
+
+@pytest.mark.asyncio
+async def test_failed_body_fetch_falls_through_to_the_next_part():
+    service = _stored_body_service(
+        [
+            _stored_part("text/html", "att-broken"),
+            _stored_part("text/html", "att-html", charset="windows-1252"),
+        ],
+        attachment_responses={("msg-1", "att-broken"): RuntimeError("boom")},
+    )
+
+    result = await _unwrap(get_gmail_message_content)(
+        service=service,
+        message_id="msg-1",
+        user_google_email="user@example.com",
+        body_format="html",
+    )
+
+    assert result.endswith("\n--- BODY ---\n<p>Café “naïve”</p>")
+    assert _fetched_attachment_ids(service) == ["att-broken", "att-html"]
+
+
+def _created_draft(service):
+    create = service.users().drafts().create
+    raw = create.call_args.kwargs["body"]["message"]["raw"]
+    return message_from_bytes(base64.urlsafe_b64decode(raw), policy=SMTP)
+
+
+@pytest.mark.asyncio
+async def test_forward_includes_attachment_backed_bodies():
+    service = _stored_body_service(_stored_body_parts())
+
+    await _forward_gmail_message_impl(
+        service=service,
+        message_id="msg-1",
+        to="recipient@example.com",
+        user_google_email="user@example.com",
+        as_draft=True,
+    )
+
+    draft = _created_draft(service)
+    assert "Plain café" in draft.get_body(preferencelist=("plain",)).get_content()
+    assert "Café “naïve”" in draft.get_body(preferencelist=("html",)).get_content()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "too_large, failure",
+    [
+        (False, RuntimeError("boom")),
+        (True, RuntimeError("boom")),
+        (False, {"data": "=="}),
+        (False, {"data": "A"}),
+    ],
+)
+async def test_forward_aborts_when_a_body_cannot_be_fetched(
+    monkeypatch, too_large, failure
+):
+    if too_large:
+        monkeypatch.setenv("WORKSPACE_MCP_MAX_FILE_BYTES", "32")
+    service = _stored_body_service(
+        _stored_body_parts(),
+        attachment_responses={("msg-1", "att-html"): failure},
+    )
+
+    with pytest.raises(ToolError, match="original message body"):
+        await _forward_gmail_message_impl(
+            service=service,
+            message_id="msg-1",
+            to="recipient@example.com",
+            user_google_email="user@example.com",
+            as_draft=True,
+        )
+
+    service.users().drafts().create.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_reply_quote_fetches_only_the_target_body():
+    def stored_message(message_id, attachment_id):
+        return {
+            "id": message_id,
+            "payload": {
+                "headers": _headers(**{"Message-ID": f"<{message_id}@example.com>"}),
+                "mimeType": "multipart/alternative",
+                "parts": [_stored_part("text/plain", attachment_id)],
+            },
+        }
+
+    service = _build_service(
+        thread_responses={
+            ("thread-1", "full"): {
+                "messages": [
+                    stored_message("msg-0", "att-old"),
+                    stored_message("msg-1", "att-text"),
+                ]
+            }
+        },
+        attachment_responses={
+            ("msg-1", "att-text"): _attachment_data("Plain café".encode())
+        },
+    )
+    service.users().settings().sendAs().list().execute.return_value = {"sendAs": []}
+
+    await _unwrap(draft_gmail_message)(
+        service=service,
+        user_google_email="user@example.com",
+        to="recipient@example.com",
+        subject="Re: Example subject",
+        body="Thanks",
+        thread_id="thread-1",
+        quote_original=True,
+        include_signature=False,
+    )
+
+    assert "Plain café" in _created_draft(service).get_body(("plain",)).get_content()
+    assert _fetched_attachment_ids(service) == ["att-text"]
