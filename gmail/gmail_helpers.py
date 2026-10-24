@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import codecs
+import contextlib
 import logging
 import re
 import secrets
@@ -10,6 +13,7 @@ import ssl
 from collections import Counter
 from datetime import datetime, timezone
 from email.header import Header
+from email.message import Message
 from email.utils import getaddresses, parseaddr, parsedate_to_datetime
 from html.parser import HTMLParser
 from typing import Any, Callable, Dict, Iterable, List, Literal, Mapping, Optional
@@ -782,6 +786,26 @@ class _HTMLBlockTextExtractor(HTMLParser):
         text = "\n".join(lines)
         text = re.sub(r"\n{3,}", "\n\n", text)
         return text.strip()
+
+
+def decode_part_body(part: Mapping[str, Any]) -> str:
+    """Decode a Gmail payload part's inline body using its declared charset."""
+    raw = base64.urlsafe_b64decode(part["body"]["data"])
+    headers = Message()
+    for header in part.get("headers", []):
+        headers[header["name"]] = header["value"]
+    charset = headers.get_content_charset() or "utf-8"
+    attempts = [(charset, "strict"), ("utf-8", "strict"), (charset, "ignore")]
+    # WHATWG reads these labels as windows-1252, and they often mislabel UTF-8.
+    with contextlib.suppress(LookupError):
+        if codecs.lookup(charset).name in {"ascii", "cp1252", "iso8859-1"}:
+            attempts = [("utf-8", "strict"), ("cp1252", "strict"), ("cp1252", "ignore")]
+    for codec, errors in attempts:
+        try:
+            return raw.decode(codec, errors)
+        except (LookupError, UnicodeError):
+            continue
+    return raw.decode("utf-8", errors="ignore")
 
 
 def html_to_text_preserving_breaks(html_content: str) -> str:
