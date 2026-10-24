@@ -272,12 +272,21 @@ class TestCommentOutputFormat:
         assert result.splitlines() == expected
 
 
+def _mock_own_comment(is_author):
+    """Build a mock service whose comments.get reports author.me."""
+    mock_service = Mock()
+    mock_service.comments.return_value.get.return_value.execute = Mock(
+        return_value={"author": {"me": is_author}}
+    )
+    return mock_service
+
+
 class TestUpdateDeleteComment:
     """manage_*_comment can edit and delete existing comments."""
 
     @pytest.mark.asyncio
     async def test_update_patches_comment_content(self):
-        mock_service = Mock()
+        mock_service = _mock_own_comment(True)
         mock_service.comments.return_value.update.return_value.execute = Mock(
             return_value={
                 **_make_comment("c1", "fixed\ntypo"),
@@ -298,6 +307,7 @@ class TestUpdateDeleteComment:
         assert call_kwargs["fileId"] == "doc1"
         assert call_kwargs["commentId"] == "c1"
         assert call_kwargs["body"] == {"content": "fixed\ntypo"}
+        assert call_kwargs["fields"] == "id,content,author,modifiedTime"
         assert result.splitlines() == [
             "Comment c1 updated successfully!",
             "Author: Alice",
@@ -308,7 +318,7 @@ class TestUpdateDeleteComment:
 
     @pytest.mark.asyncio
     async def test_delete_removes_comment(self):
-        mock_service = Mock()
+        mock_service = _mock_own_comment(True)
         mock_service.comments.return_value.delete.return_value.execute = Mock(
             return_value=""
         )
@@ -321,6 +331,27 @@ class TestUpdateDeleteComment:
             fileId="pres1", commentId="c1"
         )
         assert result == "Comment c1 deleted from presentation pres1."
+
+    @pytest.mark.parametrize("action", ["update", "delete"])
+    @pytest.mark.asyncio
+    async def test_other_authors_comment_is_rejected(self, action):
+        mock_service = _mock_own_comment(False)
+
+        with pytest.raises(UserInputError, match="only its author"):
+            await _manage_comment_dispatch(
+                mock_service,
+                "document",
+                "doc1",
+                action,
+                comment_content="x",
+                comment_id="c1",
+            )
+
+        mock_service.comments.return_value.get.assert_called_once_with(
+            fileId="doc1", commentId="c1", fields="author(me)"
+        )
+        mock_service.comments.return_value.update.assert_not_called()
+        mock_service.comments.return_value.delete.assert_not_called()
 
     @pytest.mark.parametrize(
         "action, kwargs, message",

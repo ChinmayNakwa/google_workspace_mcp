@@ -470,6 +470,20 @@ async def _resolve_comment_impl(
     return f"Comment {comment_id} has been resolved successfully.\nResolve reply ID: {reply_id}\nAuthor: {author}\nCreated: {created}"
 
 
+async def _require_own_comment(service, file_id: str, comment_id: str) -> None:
+    """Raise UserInputError unless the authenticated user wrote the comment."""
+    comment = await asyncio.to_thread(
+        service.comments()
+        .get(fileId=file_id, commentId=comment_id, fields="author(me)")
+        .execute
+    )
+    if not comment.get("author", {}).get("me"):
+        raise UserInputError(
+            f"Comment {comment_id} was written by another user; only its author "
+            "can update or delete it."
+        )
+
+
 async def _update_comment_impl(
     service, app_name: str, file_id: str, comment_id: str, comment_content: str
 ) -> str:
@@ -477,6 +491,7 @@ async def _update_comment_impl(
     logger.info(
         f"[update_{app_name}_comment] Updating comment {comment_id} in {app_name} {file_id}"
     )
+    await _require_own_comment(service, file_id, comment_id)
 
     comment = await asyncio.to_thread(
         service.comments()
@@ -502,6 +517,7 @@ async def _delete_comment_impl(
     logger.info(
         f"[delete_{app_name}_comment] Deleting comment {comment_id} in {app_name} {file_id}"
     )
+    await _require_own_comment(service, file_id, comment_id)
 
     await asyncio.to_thread(
         service.comments().delete(fileId=file_id, commentId=comment_id).execute
