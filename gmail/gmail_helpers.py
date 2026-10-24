@@ -6,6 +6,7 @@ import asyncio
 import base64
 import codecs
 import contextlib
+import itertools
 import logging
 import re
 import secrets
@@ -873,8 +874,10 @@ class _HTMLLinkExtractor(HTMLParser):
 _TEXT_URL_RE = re.compile(r"https?://[^\s<>\"]+", re.IGNORECASE)
 
 
-def format_html_links(html_body: str, known_text: str) -> str:
-    """Return a LINKS section for http(s) anchors in ``html_body`` absent from ``known_text``."""
+def format_html_links(
+    html_body: str, known_text: str, limit: Optional[int] = None
+) -> str:
+    """Return a LINKS section of http(s) anchors missing from ``known_text``, capped at ``limit``."""
     if not html_body:
         return ""
     parser = _HTMLLinkExtractor()
@@ -890,6 +893,13 @@ def format_html_links(html_body: str, known_text: str) -> str:
         for url, text in parser.links.items()
         if url not in shown
     ]
+    if limit is not None:
+        kept = sum(
+            size <= limit
+            for size in itertools.accumulate(len(line) + 1 for line in lines)
+        )
+        if kept < len(lines):
+            lines = lines[:kept] + [f"[{len(lines) - kept} more links omitted]"]
     return "\n\n--- LINKS ---\n" + "\n".join(lines) if lines else ""
 
 

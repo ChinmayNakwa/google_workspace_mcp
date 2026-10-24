@@ -306,8 +306,7 @@ def _format_body_content(
     else:
         content = "[No readable content found]"
     if include_links:
-        links = format_html_links(html_stripped, content)
-        content += _truncate_content(links, HTML_BODY_TRUNCATE_LIMIT)
+        content += format_html_links(html_stripped, content, HTML_BODY_TRUNCATE_LIMIT)
     return content
 
 
@@ -911,8 +910,7 @@ def _render_attached_messages(
                 HTML_BODY_TRUNCATE_LIMIT,
             )
             if include_links and body_format == "text":
-                links = format_html_links(html_body, body)
-                body += _truncate_content(links, HTML_BODY_TRUNCATE_LIMIT)
+                body += format_html_links(html_body, body, HTML_BODY_TRUNCATE_LIMIT)
             lines = [
                 f"--- ATTACHED MESSAGE {counts['shown']} (headers as claimed "
                 "by the attachment, unverified) ---"

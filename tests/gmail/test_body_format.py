@@ -256,6 +256,15 @@ class TestFormatBodyContentTextMode:
         result = _format_body_content("Body", html, include_links=True)
         assert result == "Body\n\n--- LINKS ---\n- Split label: https://example.com/ab"
 
+    def test_link_section_keeps_whole_urls_within_the_limit(self):
+        html = "".join(
+            f'<a href="https://example.com/{i:04}">L</a>' for i in range(2000)
+        )
+        result = _format_body_content("Body", html, include_links=True)
+        entries = result.split("\n\n--- LINKS ---\n")[1].split("\n")
+        assert entries[-2] == f"- L: https://example.com/{len(entries) - 2:04}"
+        assert entries[-1] == f"[{2001 - len(entries)} more links omitted]"
+
     def test_lists_links_when_html_has_no_text(self):
         html = '<a href="https://example.com/x"><img src="logo.png"></a>'
         result = _format_body_content("", html, include_links=True)
