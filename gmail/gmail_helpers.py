@@ -342,50 +342,68 @@ async def _fetch_with_retry(
 
 async def _fetch_body_data(
     service, message_id: Optional[str], attachment_id: str, body: Dict[str, Any]
-) -> None:
-    """Store an attachment-backed body part's data on ``body`` when it can be fetched."""
+) -> Optional[str]:
+    """Store an attachment-backed body part's data on ``body``; return why it failed."""
     try:
         ensure_within_file_size_limit(
             body.get("size"), file_id=attachment_id, kind="message body"
         )
+        _, response, error = await _fetch_with_retry(
+            lambda: (
+                service.users()
+                .messages()
+                .attachments()
+                .get(userId="me", messageId=message_id, id=attachment_id)
+            ),
+            item_id=attachment_id,
+            item_label="message body",
+            log_prefix="fetch_attachment_backed_bodies",
+        )
+        if error is not None:
+            return f"Could not fetch message body {attachment_id}: {error}"
+        response = response or {}
+        ensure_within_file_size_limit(
+            response.get("size"), file_id=attachment_id, kind="message body"
+        )
     except FileTooLargeError as error:
         logger.warning(f"Skipping message body of {message_id}: {error}")
-        return
-    _, response, _ = await _fetch_with_retry(
-        lambda: (
-            service.users()
-            .messages()
-            .attachments()
-            .get(userId="me", messageId=message_id, id=attachment_id)
-        ),
-        item_id=attachment_id,
-        item_label="message body",
-        log_prefix="fetch_attachment_backed_bodies",
-    )
-    if response and response.get("data"):
-        body["data"] = response["data"]
+        return str(error)
+    if not response.get("data"):
+        return f"Message body {attachment_id} came back empty"
+    body["data"] = response["data"]
+    return None
 
 
 async def fetch_attachment_backed_bodies(
     service, messages: Iterable[Mapping[str, Any]]
-) -> None:
-    """Fill in the text/plain and text/html bodies Gmail stores behind an attachmentId."""
+) -> List[str]:
+    """Fill in the text/plain and text/html bodies Gmail stores behind an attachmentId.
+
+    Returns why each body that is still missing could not be fetched.
+    """
+    errors: List[str] = []
     for message in messages:
         pending = [message.get("payload") or {}]
+        failures: Dict[str, str] = {}
         wanted = {"text/plain", "text/html"}
         while pending and wanted:
             part = pending.pop(0)
             mime_type = part.get("mimeType", "")
             body = part.get("body") or {}
             attachment_id = None if part.get("filename") else body.get("attachmentId")
-            if mime_type in wanted and (body.get("data") or attachment_id):
+            if mime_type in wanted and not body.get("data") and attachment_id:
+                error = await _fetch_body_data(
+                    service, message.get("id"), attachment_id, body
+                )
+                if error:
+                    failures[mime_type] = error
+            if mime_type in wanted and body.get("data"):
                 wanted.discard(mime_type)
-                if not body.get("data"):
-                    await _fetch_body_data(
-                        service, message.get("id"), attachment_id, body
-                    )
+                failures.pop(mime_type, None)
             if mime_type.startswith("multipart/"):
                 pending.extend(part.get("parts") or [])
+        errors.extend(failures.values())
+    return errors
 
 
 async def send_message_once(service, send_body: Dict[str, Any]) -> Dict[str, Any]:

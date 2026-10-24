@@ -1047,11 +1047,6 @@ async def _fetch_thread_reply_context(
             "cc": headers.get("Cc", ""),
             "date": headers.get("Date", ""),
         }
-        if include_bodies:
-            await fetch_attachment_backed_bodies(service, [msg])
-            bodies = _extract_message_bodies(payload)
-            context["text_body"] = bodies.get("text", "")
-            context["html_body"] = bodies.get("html", "")
         message_contexts.append(context)
         # Automatic selection only considers actual sent or received messages.
         # Gmail web renders a reaction as a chip on its parent, so a reply
@@ -1074,6 +1069,15 @@ async def _fetch_thread_reply_context(
                 break
     elif eligible_contexts:
         target = eligible_contexts[-1]
+
+    if include_bodies and target:
+        target_msg = next(
+            msg for msg, context in zip(messages, message_contexts) if context is target
+        )
+        await fetch_attachment_backed_bodies(service, [target_msg])
+        bodies = _extract_message_bodies(target_msg.get("payload", {}))
+        target["text_body"] = bodies.get("text", "")
+        target["html_body"] = bodies.get("html", "")
 
     return {
         "messages": eligible_contexts,
@@ -3100,7 +3104,11 @@ async def _forward_gmail_message_impl(
         .get(userId="me", id=message_id, format="full")
         .execute
     )
-    await fetch_attachment_backed_bodies(service, [original_message])
+    body_errors = await fetch_attachment_backed_bodies(service, [original_message])
+    if body_errors:
+        raise ToolExecutionError(
+            "Failed to include the original message body: " + "; ".join(body_errors)
+        )
 
     payload = original_message.get("payload", {})
 
