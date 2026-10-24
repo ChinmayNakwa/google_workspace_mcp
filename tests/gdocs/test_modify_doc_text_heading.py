@@ -228,12 +228,15 @@ class TestModifyDocTextHeading:
         }
         assert requests[1]["insertText"]["location"]["index"] == 14
         assert requests[1]["insertText"]["text"] == "New body\n"
-        styles = [r for r in requests if "updateParagraphStyle" in r]
-        assert styles and all(
-            r["updateParagraphStyle"]["paragraphStyle"]["namedStyleType"]
-            == "NORMAL_TEXT"
-            for r in styles
-        )
+        styles = [
+            r["updateParagraphStyle"]["paragraphStyle"]
+            for r in requests
+            if "updateParagraphStyle" in r
+        ]
+        assert styles == [
+            {"namedStyleType": "NORMAL_TEXT"},
+            {"spaceBelow": {"magnitude": 12, "unit": "PT"}},
+        ]
         service.documents.return_value.get.assert_called_once_with(
             documentId="d" * 25, includeTabsContent=True
         )
