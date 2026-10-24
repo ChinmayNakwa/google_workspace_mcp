@@ -78,6 +78,7 @@ from gmail.gmail_helpers import (
     _fetch_with_retry,
     _format_id_list,
     _get_send_as_identity_and_signature,
+    _html_signature_separator,
     _http_error_status,
     _inherit_reply_subject,
     _is_email_reaction,
@@ -676,7 +677,7 @@ def _append_signature_to_body(
         return body
 
     if body_format == "html":
-        separator = "<br><br>" if body.strip() else ""
+        separator = _html_signature_separator(body)
         return f"{body}{separator}{_wrap_signature_html(signature_html)}"
 
     signature_text = _signature_html_to_text(signature_html).strip()
@@ -711,10 +712,7 @@ def _build_quoted_reply_body(
         attribution = f"{sender} wrote:"
 
     if body_format == "html":
-        # Signature
-        sig_block = ""
-        if signature_html and signature_html.strip():
-            sig_block = f"<br><br>{_wrap_signature_html(signature_html)}"
+        signed_body = _append_signature_to_body(reply_body, "html", signature_html)
 
         # Quoted original
         orig_html = original.get("html_body") or ""
@@ -729,7 +727,7 @@ def _build_quoted_reply_body(
             f"{orig_html}"
             "</blockquote></div>"
         )
-        return f"{reply_body}{sig_block}{quote_block}"
+        return f"{signed_body}{quote_block}"
 
     # Plain text path
     sig_block = ""

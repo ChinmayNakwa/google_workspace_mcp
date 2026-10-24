@@ -752,6 +752,8 @@ class _HTMLBlockTextExtractor(HTMLParser):
             # A nested block starts a new visual line even when its parent
             # already contains text (for example, Name<div>Title</div>).
             self._append_line_break()
+            if ("data-smartmail", "gmail_signature") in attrs:
+                self._append_line_break(force=True)
         elif tag in ("td", "th"):
             # Separating at the start tag also covers omitted </td> and </th>.
             if self._text and not self._text[-1].endswith((" ", "\n")):
@@ -1332,6 +1334,52 @@ def _build_web_compose_raw(
 def _signature_html_to_text(signature_html: str) -> str:
     """Convert Gmail signature HTML to plain text, preserving line breaks."""
     return html_to_text_preserving_breaks(signature_html)
+
+
+_MARGIN_BLOCK_TAGS = frozenset(
+    {
+        "blockquote",
+        "dl",
+        "figure",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "ol",
+        "p",
+        "pre",
+        "ul",
+    }
+)
+_END_TAG_RE = re.compile(r"</([a-zA-Z][a-zA-Z0-9]*)\s*>\s*")
+_TRAILING_BREAK_RE = re.compile(r"<[bh]r\b[^<>]*>\s*\Z", re.IGNORECASE)
+_RESTYLED_MARGIN_RE = re.compile(
+    rf"<style\b[^<>]*>[^<]*margin|<(?:{'|'.join(sorted(_MARGIN_BLOCK_TAGS))})\b[^<>]*margin",
+    re.IGNORECASE,
+)
+
+
+def _html_signature_separator(body: str) -> str:
+    """Return markup leaving one blank line between an HTML body and a signature."""
+    body = body.rstrip()
+    while body.endswith("-->") and (start := body.rfind("<!--")) != -1:
+        body = body[:start].rstrip()
+    if not body:
+        return ""
+    if _TRAILING_BREAK_RE.search(body):
+        return "<br>"
+    closed_tags = set()
+    end = len(body)
+    while match := _END_TAG_RE.fullmatch(body, body.rfind("</", 0, end), end):
+        closed_tags.add(match[1].lower())
+        end = match.start()
+    if closed_tags & _MARGIN_BLOCK_TAGS and not _RESTYLED_MARGIN_RE.search(body):
+        return ""
+    if closed_tags & _HTMLBlockTextExtractor._BLOCK_TAGS:
+        return "<br>"
+    return "<br><br>"
 
 
 def _wrap_signature_html(signature_html: str) -> str:
