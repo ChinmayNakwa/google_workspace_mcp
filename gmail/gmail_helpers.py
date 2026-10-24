@@ -1285,7 +1285,10 @@ _RESTYLED_MARGIN_RE = re.compile(
 
 def _html_signature_separator(body: str) -> str:
     """Return markup leaving one blank line between an HTML body and a signature."""
-    if not body.strip():
+    body = body.rstrip()
+    while body.endswith("-->") and (start := body.rfind("<!--")) != -1:
+        body = body[:start].rstrip()
+    if not body:
         return ""
     if _TRAILING_BREAK_RE.search(body):
         return "<br>"

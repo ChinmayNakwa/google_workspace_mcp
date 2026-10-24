@@ -244,6 +244,8 @@ class TestHtmlSignatureSeparator:
             ('<p style="margin:0">Hello</p>', "<br>"),
             ("<style>p{margin:0}</style><p>Hello</p>", "<br>"),
             ("<style>.label{color:red}</style><p>Hello</p>", ""),
+            ("<p>Hello</p><!-- footer -->\n", ""),
+            ("<div>Hello</div> <!-- a --><!-- b -->", "<br>"),
             ("", ""),
         ],
     )
