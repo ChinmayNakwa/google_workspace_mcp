@@ -6,10 +6,12 @@ inputs, building event request payloads, and formatting event data for display.
 """
 
 import asyncio
+import contextlib
 import datetime
 import json
 import logging
 import re
+import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -957,7 +959,7 @@ async def _split_recurring_event(
     )
     series_id = instance.get("recurringEventId")
     split_at = parse_event_boundary(instance, "originalStartTime")
-    if not series_id or split_at is None or not {"start", "end"} <= instance.keys():
+    if not series_id or split_at is None or instance.get("status") == "cancelled":
         raise UserInputError(
             f"Event '{instance_id}' is not an active instance of a recurring series. "
             "Pass a recurring instance ID from get_events."
@@ -966,21 +968,45 @@ async def _split_recurring_event(
         lambda: events.get(calendarId=calendar_id, eventId=series_id).execute()
     )
     first = parse_event_boundary(series, "start")
-    if first and (first.moment or first.local_date) == (
-        split_at.moment or split_at.local_date
-    ):
+    last = parse_event_boundary(series, "end")
+    if first is None or last is None:
+        raise Exception(f"Series '{series_id}' has no readable start or end.")
+    if (first.moment or first.local_date) == (split_at.moment or split_at.local_date):
         raise UserInputError(
             f"Event '{instance_id}' is the first instance of its series. Update the "
             f"series '{series_id}' directly instead."
         )
     recurrence = series.get("recurrence", [])
-    if "recurrence" not in changes and any("COUNT=" in r.upper() for r in recurrence):
+    upper_rules = [r.upper() for r in recurrence]
+    if any(r.startswith("RDATE") for r in upper_rules):
+        raise UserInputError(
+            "This series has RDATE entries, which cannot be split. Update the series "
+            "directly instead."
+        )
+    if "recurrence" not in changes and any("COUNT=" in r for r in upper_rules):
         raise UserInputError(
             "This series ends after a fixed COUNT. Pass recurrence for the new series."
         )
 
+    if split_at.is_all_day:
+        span = last.local_date - first.local_date
+        end = {"date": (split_at.local_date + span).isoformat()}
+    else:
+        span = last.moment - first.moment
+        end = {**series["end"], "dateTime": (split_at.moment + span).isoformat()}
     new_series = {k: v for k, v in series.items() if k not in _SERIES_SERVER_FIELDS}
-    new_series.update({"start": instance["start"], "end": instance["end"], **changes})
+    new_series.update(
+        {
+            "id": uuid.uuid4().hex,
+            "start": instance["originalStartTime"],
+            "end": end,
+            **changes,
+        }
+    )
+    for key in ("start", "end"):
+        zone = series[key].get("timeZone")
+        if zone and "dateTime" in new_series[key]:
+            new_series[key] = {"timeZone": zone, **new_series[key]}
 
     def set_recurrence(rules: List[str]) -> None:
         events.patch(
@@ -1002,7 +1028,20 @@ async def _split_recurring_event(
             ).execute()
         )
     except Exception:
-        await asyncio.to_thread(set_recurrence, recurrence)
+        with contextlib.suppress(Exception):
+            return await asyncio.to_thread(
+                lambda: events.get(
+                    calendarId=calendar_id, eventId=new_series["id"]
+                ).execute()
+            )
+        try:
+            await asyncio.to_thread(set_recurrence, recurrence)
+        except Exception as restore_error:
+            raise Exception(
+                f"Could not create the new series or restore series '{series_id}', "
+                f"which now ends before instance '{instance_id}'. Restore its "
+                f"recurrence to {recurrence}."
+            ) from restore_error
         raise
 
 

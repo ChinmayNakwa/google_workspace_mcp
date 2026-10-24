@@ -592,10 +592,10 @@ _INSTANCE = {
 }
 
 
-def _series_service(instance, series):
+def _series_service(instance, series, *later_gets):
     service = Mock()
     events = service.events.return_value
-    events.get.return_value.execute.side_effect = [instance, series]
+    events.get.return_value.execute.side_effect = [instance, series, *later_gets]
     events.insert.return_value.execute.return_value = {
         "id": "series2",
         "summary": series.get("summary"),
@@ -632,11 +632,44 @@ async def test_manage_event_this_and_following_splits_series():
     inserted = events.insert.call_args.kwargs["body"]
     assert inserted["summary"] == "Weekly sync"
     assert inserted["attendees"] == [{"email": "teammate@example.com"}]
-    assert inserted["start"] == {"dateTime": "2026-05-13T10:00:00-04:00"}
-    assert inserted["end"] == {"dateTime": "2026-05-13T11:00:00-04:00"}
+    assert inserted["start"] == {
+        "dateTime": "2026-05-13T10:00:00-04:00",
+        "timeZone": _NY,
+    }
+    assert inserted["end"] == {
+        "dateTime": "2026-05-13T11:00:00-04:00",
+        "timeZone": _NY,
+    }
     assert inserted["recurrence"] == ["RRULE:FREQ=WEEKLY;BYDAY=WE"]
-    assert not {"id", "iCalUID", "etag", "htmlLink"} & inserted.keys()
+    assert inserted["id"] != "series1"
+    assert not {"iCalUID", "etag", "htmlLink"} & inserted.keys()
     assert "series ID series2" in result
+
+
+@pytest.mark.asyncio
+async def test_this_and_following_moved_instance_keeps_series_slot():
+    moved = {
+        **_INSTANCE,
+        "start": {"dateTime": "2026-05-12T15:00:00-04:00", "timeZone": _NY},
+        "end": {"dateTime": "2026-05-12T17:30:00-04:00", "timeZone": _NY},
+    }
+    service, events = _series_service(moved, _SERIES)
+
+    await _modify_event_impl(
+        service=service,
+        user_google_email="user@example.com",
+        event_id=moved["id"],
+        summary="Renamed",
+        recurrence=["RRULE:FREQ=WEEKLY;BYDAY=MO"],
+        this_and_following=True,
+    )
+
+    inserted = events.insert.call_args.kwargs["body"]
+    assert inserted["start"] == _INSTANCE["originalStartTime"]
+    assert inserted["end"] == {
+        "dateTime": "2026-05-11T13:00:00-04:00",
+        "timeZone": _NY,
+    }
 
 
 @pytest.mark.asyncio
@@ -677,7 +710,7 @@ async def test_this_and_following_all_day_keeps_rules_and_instance_times():
 
 @pytest.mark.asyncio
 async def test_this_and_following_restores_series_when_insert_fails():
-    service, events = _series_service(_INSTANCE, _SERIES)
+    service, events = _series_service(_INSTANCE, _SERIES, RuntimeError("not found"))
     events.insert.return_value.execute.side_effect = RuntimeError("insert failed")
 
     with pytest.raises(RuntimeError, match="insert failed"):
@@ -696,17 +729,83 @@ async def test_this_and_following_restores_series_when_insert_fails():
 
 
 @pytest.mark.asyncio
+async def test_this_and_following_reports_truncated_series_when_restore_fails():
+    service, events = _series_service(_INSTANCE, _SERIES, RuntimeError("not found"))
+    events.insert.return_value.execute.side_effect = RuntimeError("insert failed")
+    events.patch.return_value.execute.side_effect = [{}, RuntimeError("rate limit")]
+
+    with pytest.raises(Exception, match="now ends before instance") as excinfo:
+        await _modify_event_impl(
+            service=service,
+            user_google_email="user@example.com",
+            event_id=_INSTANCE["id"],
+            recurrence=["RRULE:FREQ=WEEKLY;BYDAY=WE"],
+            this_and_following=True,
+        )
+
+    assert "COUNT=52" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_this_and_following_keeps_insert_that_landed_despite_error():
+    created = {"id": "series2", "summary": "Weekly sync"}
+    service, events = _series_service(_INSTANCE, _SERIES, created)
+    events.insert.return_value.execute.side_effect = TimeoutError("read timed out")
+
+    result = await _modify_event_impl(
+        service=service,
+        user_google_email="user@example.com",
+        event_id=_INSTANCE["id"],
+        recurrence=["RRULE:FREQ=WEEKLY;BYDAY=WE"],
+        this_and_following=True,
+    )
+
+    inserted_id = events.insert.call_args.kwargs["body"]["id"]
+    assert events.get.call_args.kwargs["eventId"] == inserted_id
+    assert events.patch.call_count == 1
+    assert "series ID series2" in result
+
+
+@pytest.mark.asyncio
+async def test_this_and_following_rejects_series_with_rdate():
+    series = {**_SERIES, "recurrence": ["RRULE:FREQ=WEEKLY", "RDATE:20260601T130000Z"]}
+    service, events = _series_service(_INSTANCE, series)
+
+    with pytest.raises(UserInputError, match="RDATE"):
+        await _modify_event_impl(
+            service=service,
+            user_google_email="user@example.com",
+            event_id=_INSTANCE["id"],
+            recurrence=["RRULE:FREQ=WEEKLY;BYDAY=WE"],
+            this_and_following=True,
+        )
+
+    events.patch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_this_and_following_rejects_non_update_actions():
+    service = Mock()
+
+    with pytest.raises(UserInputError, match="only to the update action"):
+        await _unwrap(manage_event)(
+            service=service,
+            user_google_email="user@example.com",
+            action="delete",
+            event_id=_INSTANCE["id"],
+            this_and_following=True,
+        )
+
+    assert service.mock_calls == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "instance, recurrence, error",
     [
         (_SERIES, ["RRULE:FREQ=WEEKLY"], "not an active instance"),
         (
-            {
-                "id": _INSTANCE["id"],
-                "status": "cancelled",
-                "recurringEventId": "series1",
-                "originalStartTime": _INSTANCE["originalStartTime"],
-            },
+            {**_INSTANCE, "status": "cancelled"},
             ["RRULE:FREQ=WEEKLY"],
             "not an active instance",
         ),

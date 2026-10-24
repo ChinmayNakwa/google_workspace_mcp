@@ -1022,6 +1022,9 @@ async def manage_event(
                 f"Invalid send_updates '{send_updates}'. Must be one of: {sorted(valid_send_updates)}"
             )
 
+    if this_and_following and action_lower != "update":
+        raise UserInputError("this_and_following applies only to the update action.")
+
     # Resolve the conferencing inputs (raw payload or helper params) once for the
     # actions that build an event body.
     resolved_conference_data = None
