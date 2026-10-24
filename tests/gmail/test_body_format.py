@@ -218,6 +218,8 @@ class TestFormatBodyContentTextMode:
             ("Go to https://example.com.au/x", True),
             ("Go to https://example.com:8443/x", True),
             ("See https://example.com(1)", True),
+            ("Ref [https://example.com]", False),
+            ("Next https://example.com/?u=x", True),
         ],
     )
     def test_lists_link_unless_text_shows_the_exact_url(self, text, listed):

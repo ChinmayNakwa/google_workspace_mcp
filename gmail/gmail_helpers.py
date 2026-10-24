@@ -870,6 +870,9 @@ class _HTMLLinkExtractor(HTMLParser):
         self._flush()
 
 
+_TEXT_URL_RE = re.compile(r"https?://[^\s<>\"]+", re.IGNORECASE)
+
+
 def format_html_links(html_body: str, known_text: str) -> str:
     """Return a LINKS section for http(s) anchors in ``html_body`` absent from ``known_text``."""
     if not html_body:
@@ -877,10 +880,15 @@ def format_html_links(html_body: str, known_text: str) -> str:
     parser = _HTMLLinkExtractor()
     parser.feed(html_body)
     parser.close()
+    shown = {
+        url
+        for token in _TEXT_URL_RE.findall(known_text)
+        for url in (token, token.rstrip(".,;:!?)]"))
+    }
     lines = [
         f"- {text}: {url}" if text and text != url else f"- {url}"
         for url, text in parser.links.items()
-        if not re.search(re.escape(url) + r"(?=[.,;:!?]*(?:[\s<>\")\]]|$))", known_text)
+        if url not in shown
     ]
     return "\n\n--- LINKS ---\n" + "\n".join(lines) if lines else ""
 
