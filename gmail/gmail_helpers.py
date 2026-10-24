@@ -817,10 +817,12 @@ class _HTMLLinkExtractor(HTMLParser):
         self._text = []
 
     def handle_starttag(self, tag, attrs):
+        if tag == "br":
+            self.handle_data(" ")
         if tag != "a":
             return
         self._flush()
-        href = (dict(attrs).get("href") or "").strip()
+        href = re.sub(r"[\t\n\r]", "", dict(attrs).get("href") or "").strip()
         if href.lower().startswith(("http://", "https://")):
             self._href = href
 
@@ -832,6 +834,13 @@ class _HTMLLinkExtractor(HTMLParser):
         if self._href is not None:
             self._text.append(data)
 
+    def parse_marked_section(self, i, report=1):
+        # Older CPython patch releases raise on unknown <![...]> sections.
+        try:
+            return super().parse_marked_section(i, report)
+        except AssertionError:
+            return self.parse_bogus_comment(i)
+
     def close(self):
         super().close()
         self._flush()
@@ -842,15 +851,12 @@ def format_html_links(html_body: str, known_text: str) -> str:
     if not html_body:
         return ""
     parser = _HTMLLinkExtractor()
-    try:
-        parser.feed(html_body)
-        parser.close()
-    except AssertionError:
-        logger.debug("Stopped HTML link extraction at a malformed declaration")
+    parser.feed(html_body)
+    parser.close()
     lines = [
         f"- {text}: {url}" if text and text != url else f"- {url}"
         for url, text in parser.links.items()
-        if not re.search(re.escape(url) + r"(?![\w/?#&=%~+-])", known_text)
+        if not re.search(re.escape(url) + r"(?=[.,;:!?]*(?:[\s<>\")\]]|$))", known_text)
     ]
     return "\n\n--- LINKS ---\n" + "\n".join(lines) if lines else ""
 

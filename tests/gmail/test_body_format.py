@@ -208,23 +208,51 @@ class TestFormatBodyContentTextMode:
             "- http://plain.example"
         )
 
-    def test_lists_link_that_only_prefixes_a_url_in_text(self):
+    @pytest.mark.parametrize(
+        ("text", "listed"),
+        [
+            ("Visit https://example.com.", False),
+            ("Home <https://example.com>", False),
+            ("Home (https://example.com).", False),
+            ("Unsub: https://example.com/u", True),
+            ("Go to https://example.com.au/x", True),
+            ("Go to https://example.com:8443/x", True),
+            ("See https://example.com(1)", True),
+        ],
+    )
+    def test_lists_link_unless_text_shows_the_exact_url(self, text, listed):
         html = '<a href="https://example.com">Home</a>'
-        shown = _format_body_content(
-            "Visit https://example.com.", html, include_links=True
-        )
-        prefix = _format_body_content(
-            "Unsub: https://example.com/u", html, include_links=True
-        )
-        assert shown == "Visit https://example.com."
-        assert prefix == (
-            "Unsub: https://example.com/u\n\n--- LINKS ---\n- Home: https://example.com"
-        )
+        result = _format_body_content(text, html, include_links=True)
+        links = "\n\n--- LINKS ---\n- Home: https://example.com"
+        assert result == (text + links if listed else text)
 
-    def test_keeps_links_before_a_malformed_declaration(self):
-        html = '<a href="https://a.example">A</a><![foo[ x ]]><a href="https://b.example">B</a>'
+    @pytest.mark.parametrize(
+        ("html", "links"),
+        [
+            (
+                '<a href="https://a.example">A</a><![foo[ x ]]>'
+                '<a href="https://b.example">B</a>',
+                "- A: https://a.example\n- B: https://b.example",
+            ),
+            (
+                '<a href="https://a.example">A</a><![ ]>'
+                '<a href="https://b.example">B</a>',
+                "- A: https://a.example\n- B: https://b.example",
+            ),
+            (
+                '<a href="https://a.example">A <![foo[ x ]]> more</a>',
+                "- A more: https://a.example",
+            ),
+        ],
+    )
+    def test_keeps_links_around_a_malformed_marked_section(self, html, links):
         result = _format_body_content("Body", html, include_links=True)
-        assert result == "Body\n\n--- LINKS ---\n- A: https://a.example"
+        assert result == f"Body\n\n--- LINKS ---\n{links}"
+
+    def test_normalizes_line_breaks_in_href_and_label(self):
+        html = '<a href="https://example.com/a\n\tb">Split<br>label</a>'
+        result = _format_body_content("Body", html, include_links=True)
+        assert result == "Body\n\n--- LINKS ---\n- Split label: https://example.com/ab"
 
     def test_lists_links_when_html_has_no_text(self):
         html = '<a href="https://example.com/x"><img src="logo.png"></a>'
@@ -732,6 +760,27 @@ async def test_get_gmail_thread_content_lists_html_links():
 
 
 @pytest.mark.asyncio
+async def test_get_gmail_messages_content_batch_lists_html_links():
+    html = '<p>Ready.</p><a href="https://example.com/export/abc">Download Data</a>'
+    service = _build_service(
+        message_responses={
+            ("msg-1", "full"): _message_response(
+                "msg-1", text="Ready.\nDownload Data", html=html
+            ),
+        }
+    )
+
+    result = await _unwrap(get_gmail_messages_content_batch)(
+        service=service,
+        message_ids=["msg-1"],
+        user_google_email="user@example.com",
+        include_links=True,
+    )
+
+    assert "- Download Data: https://example.com/export/abc" in result
+
+
+@pytest.mark.asyncio
 async def test_get_gmail_threads_content_batch_supports_raw_format():
     service = _build_service(
         message_responses={
@@ -895,6 +944,31 @@ async def test_full_export_text_uses_plaintext(stdio_storage):
     assert "Format: txt" in result
     with open(_saved_path(result), "rb") as fh:
         assert fh.read().decode() == "Plain body"
+
+
+@pytest.mark.asyncio
+async def test_full_export_text_lists_html_links(stdio_storage):
+    service = _build_service(
+        message_responses={
+            ("msg-2", "metadata"): _metadata_response("msg-2"),
+            ("msg-2", "full"): _message_response(
+                "msg-2", text="Plain body", html='<a href="https://x.example">X</a>'
+            ),
+        }
+    )
+
+    result = await _unwrap(get_gmail_message_content)(
+        service=service,
+        message_id="msg-2",
+        user_google_email="user@example.com",
+        full=True,
+        include_links=True,
+    )
+
+    with open(_saved_path(result), "rb") as fh:
+        assert fh.read().decode() == (
+            "Plain body\n\n--- LINKS ---\n- X: https://x.example"
+        )
 
 
 @pytest.mark.asyncio

@@ -396,6 +396,7 @@ async def _export_full_message(
     headers: Dict[str, str],
     body_format: Literal["text", "html", "raw"],
     declared_size: Optional[int] = None,
+    include_links: bool = False,
 ) -> str:
     """
     Return a message's complete, untruncated content: saved to storage and
@@ -489,6 +490,8 @@ async def _export_full_message(
                 content_str = _html_to_text(html_body)
             else:
                 content_str = ""
+            if include_links:
+                content_str += format_html_links(html_body, content_str)
             mime_type = "text/plain"
             extension = ".txt"
 
@@ -902,12 +905,14 @@ def _render_attached_messages(
             # Fall back to the rfc822 part's headers if the inner root lacks them.
             headers = _extract_headers(inner, names) or _extract_headers(child, names)
             bodies = _extract_message_bodies(inner)
-            body = _format_body_content(
-                bodies.get("text", ""),
-                bodies.get("html", ""),
-                body_format,
-                include_links,
+            html_body = bodies.get("html", "")
+            body = _truncate_content(
+                _format_body_content(bodies.get("text", ""), html_body, body_format),
+                HTML_BODY_TRUNCATE_LIMIT,
             )
+            if include_links and body_format == "text":
+                links = format_html_links(html_body, body)
+                body += _truncate_content(links, HTML_BODY_TRUNCATE_LIMIT)
             lines = [
                 f"--- ATTACHED MESSAGE {counts['shown']} (headers as claimed "
                 "by the attachment, unverified) ---"
@@ -918,7 +923,7 @@ def _render_attached_messages(
                     if len(value) > ATTACHED_MESSAGE_HEADER_LIMIT:
                         value = value[:ATTACHED_MESSAGE_HEADER_LIMIT] + " [truncated]"
                     lines.append(f"{name}: {value}")
-            lines += ["", _truncate_content(body, HTML_BODY_TRUNCATE_LIMIT)]
+            lines += ["", body]
             blocks.append("\n".join(lines))
             child = inner
             depth += 1
@@ -1979,6 +1984,7 @@ async def get_gmail_message_content(
             headers,
             body_format,
             declared_size=message_metadata.get("sizeEstimate"),
+            include_links=include_links,
         )
 
     # Handle raw format separately - fetch with format="raw" and return decoded MIME

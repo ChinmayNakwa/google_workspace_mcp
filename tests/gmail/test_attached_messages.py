@@ -234,6 +234,20 @@ class TestRenderAttachedMessages:
         assert "[Content truncated...]" in out
         assert len(out) < 25_000
 
+    def test_links_survive_a_huge_wrapped_body(self):
+        inner = {
+            "mimeType": "text/html",
+            "headers": _hdrs(Subject="Long"),
+            "body": {
+                "data": _b64(
+                    "<p>" + "word " * 6000 + '</p><a href="https://x.example">X</a>'
+                )
+            },
+        }
+        out = _render_attached_messages(_wrapper(_rfc822(inner)), include_links=True)
+        assert "[Content truncated...]" in out
+        assert out.endswith("\n\n--- LINKS ---\n- X: https://x.example")
+
     def test_a_huge_wrapped_header_is_truncated(self):
         inner = _wrapped()
         inner["headers"] = _hdrs(
