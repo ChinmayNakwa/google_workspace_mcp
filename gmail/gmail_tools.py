@@ -90,6 +90,7 @@ from gmail.gmail_helpers import (
     _wrap_signature_html,
     apply_gmail_filter_to_existing,
     build_label_color,
+    decode_part_body,
     format_filter_apply_result,
     format_thread_label_outcomes,
     html_newlines_to_br,
@@ -207,13 +208,10 @@ def _extract_message_bodies(payload):
     while part_queue:
         part = part_queue.pop(0)
         mime_type = part.get("mimeType", "")
-        body_data = part.get("body", {}).get("data")
 
-        if body_data:
+        if part.get("body", {}).get("data"):
             try:
-                decoded_data = base64.urlsafe_b64decode(body_data).decode(
-                    "utf-8", errors="ignore"
-                )
+                decoded_data = decode_part_body(part)
                 if mime_type == "text/plain" and not text_body:
                     text_body = decoded_data
                 elif mime_type == "text/html" and not html_body:
@@ -228,9 +226,7 @@ def _extract_message_bodies(payload):
     # Check the main payload if it has body data directly
     if payload.get("body", {}).get("data"):
         try:
-            decoded_data = base64.urlsafe_b64decode(payload["body"]["data"]).decode(
-                "utf-8", errors="ignore"
-            )
+            decoded_data = decode_part_body(payload)
             mime_type = payload.get("mimeType", "")
             if mime_type == "text/plain" and not text_body:
                 text_body = decoded_data
@@ -1918,7 +1914,7 @@ async def get_gmail_message_content(
             return its URL/path instead of the body. body_format selects the exported
             file type: "raw" saves the byte-exact RFC 5322 message as .eml, "html"
             saves the raw HTML body, "text" saves the plaintext body. The "html"/"text"
-            exports decode as UTF-8 and drop undecodable bytes, so prefer "raw" when
+            exports are re-encoded as UTF-8 from the declared charset, so prefer "raw" when
             byte-exact fidelity matters. In stateless mode without GCS staging there is
             no storage to write to, so the untruncated content is returned inline
             instead; with GCS staging it is saved and returned as a signed URL.
