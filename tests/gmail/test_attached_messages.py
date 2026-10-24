@@ -346,6 +346,22 @@ async def test_get_gmail_message_content_shows_the_wrapped_message():
 
 
 @pytest.mark.asyncio
+async def test_get_gmail_message_content_without_headers_hides_wrapped_headers():
+    result = await _unwrap(get_gmail_message_content)(
+        service=_service_returning(_nested_payload()),
+        message_id="m-1",
+        user_google_email="user@example.com",
+        include_headers=False,
+    )
+
+    assert "Message pending" not in result
+    assert "Wrapped subject" not in result
+    assert "original@example.com" not in result
+    assert MARKER_1 in result
+    assert "Wrapped plain body" in result
+
+
+@pytest.mark.asyncio
 async def test_get_gmail_messages_content_batch_shows_the_wrapped_message():
     service = _service_returning(_nested_payload())
     # Force the sequential fallback: the batch path and it share one renderer.

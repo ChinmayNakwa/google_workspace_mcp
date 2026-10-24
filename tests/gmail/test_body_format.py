@@ -489,6 +489,37 @@ class TestExtractMessageBodies:
         assert bodies["text"] == "Nested text"
         assert bodies["html"] == "<p>Nested HTML</p>"
 
+    @pytest.mark.parametrize(
+        ("content_type", "raw", "expected"),
+        [
+            ('text/plain; charset="iso-8859-1"', "Café".encode("latin-1"), "Café"),
+            ("text/plain; charset=windows-1252", "“naïve”".encode("cp1252"), "“naïve”"),
+            (
+                "text/plain; charset=ISO-2022-JP",
+                "日本語".encode("iso-2022-jp"),
+                "日本語",
+            ),
+            ("text/plain; charset=windows-1252", b"caf\xe9\x81", "café"),
+            ("text/plain; charset=windows-1252", "Café".encode(), "Café"),
+            ("text/plain; charset=iso-8859-1", "“naïve”".encode("cp1252"), "“naïve”"),
+            ("text/plain; charset=us-ascii", "Café".encode(), "Café"),
+            ("text/plain; charset=us-ascii", "“Café”".encode("cp1252"), "“Café”"),
+            ("text/plain; charset=x-unknown", "Café".encode(), "Café"),
+            ("text/plain; charset=x-unknown", b"caf\xe9", "caf"),
+            ("text/plain; charset=gbk", "一".encode("gbk"), "一"),
+            ("text/plain", "Café".encode(), "Café"),
+        ],
+    )
+    def test_decodes_declared_charset(self, content_type, raw, expected):
+        part = {
+            "mimeType": "text/plain",
+            "headers": [{"name": "Content-Type", "value": content_type}],
+            "body": {"data": base64.urlsafe_b64encode(raw).decode()},
+        }
+        multipart = {"mimeType": "multipart/alternative", "parts": [part]}
+        assert _extract_message_bodies(part)["text"] == expected
+        assert _extract_message_bodies(multipart)["text"] == expected
+
 
 @pytest.mark.asyncio
 async def test_get_gmail_message_content_returns_raw_mime():
@@ -652,6 +683,7 @@ async def test_get_gmail_message_content_metadata_format_returns_headers_only():
         ({"body_format": "html"}, "require format='full'"),
         ({"body_format": "raw"}, "require format='full'"),
         ({"full": True}, "full=True requires format='full'"),
+        ({"include_headers": False}, "include_headers=False requires format='full'"),
     ],
 )
 async def test_get_gmail_message_content_rejects_metadata_with_body_options(
@@ -1296,3 +1328,79 @@ async def test_full_export_long_subject_does_not_crash(stdio_storage):
     saved_path = _saved_path(result)
     assert Path(saved_path).exists()
     assert len(Path(saved_path).name) < 255
+
+
+SPAM_SUBJECT = "\U0001f525\U0001f525 WIN BIG \U0001f525\U0001f525"
+SPAM_RAW = (
+    f"Subject: {SPAM_SUBJECT}\r\nFrom: Spammer <spam@example.com>\r\n\r\nspam body"
+)
+
+
+def _spam_service(message_id: str):
+    headers = _headers(Subject=SPAM_SUBJECT, From="Spammer <spam@example.com>")
+    return _build_service(
+        message_responses={
+            (message_id, "metadata"): _metadata_response(message_id, headers=headers),
+            (message_id, "full"): _message_response(
+                message_id, text="spam body", headers=headers
+            ),
+            (message_id, "raw"): {"raw": _encode(SPAM_RAW)},
+        }
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("body_format", "saved"), [("text", "spam body"), ("raw", SPAM_RAW)]
+)
+async def test_full_export_without_headers_keeps_subject_out(
+    stdio_storage, body_format, saved
+):
+    result = await _unwrap(get_gmail_message_content)(
+        service=_spam_service("spam-1"),
+        message_id="spam-1",
+        user_google_email="user@example.com",
+        body_format=body_format,
+        full=True,
+        include_headers=False,
+    )
+
+    assert SPAM_SUBJECT not in result
+    assert "Spammer" not in result
+    assert "From:" not in result
+    saved_path = _saved_path(result)
+    assert Path(saved_path).name.startswith("spam-1_")
+    with open(saved_path, "rb") as fh:
+        assert fh.read().decode() == saved
+
+
+@pytest.mark.asyncio
+async def test_inline_content_without_headers_keeps_subject_out():
+    result = await _unwrap(get_gmail_message_content)(
+        service=_spam_service("spam-2"),
+        message_id="spam-2",
+        user_google_email="user@example.com",
+        include_headers=False,
+    )
+
+    assert result.startswith("\n--- BODY ---\nspam body")
+    assert SPAM_SUBJECT not in result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("full", "stateless"), [(False, False), (True, True)])
+async def test_inline_raw_without_headers_is_rejected(monkeypatch, full, stateless):
+    monkeypatch.setattr(gmail_tools, "is_stateless_mode", lambda: stateless)
+    monkeypatch.setattr(gmail_tools, "gcs_files_enabled", lambda: False)
+    service = _spam_service("spam-3")
+
+    with pytest.raises(UserInputError, match="inline raw MIME"):
+        await _unwrap(get_gmail_message_content)(
+            service=service,
+            message_id="spam-3",
+            user_google_email="user@example.com",
+            body_format="raw",
+            full=full,
+            include_headers=False,
+        )
+    service.users().messages().get.assert_not_called()
