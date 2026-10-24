@@ -34,6 +34,7 @@ Get full content of a single message (subject, sender, recipients, date, Message
 | format | string | no | "full" | "full" (with body and attachments) or "metadata" (headers only) |
 | body_format | string | no | "text" | "text" (plaintext, HTML converted as fallback), "html" (raw HTML body) or "raw" (decoded MIME); requires format="full" |
 | full | boolean | no | false | Return the complete untruncated message as a file path (stdio) or download URL (HTTP) instead of the inline body, which is truncated at 20,000 chars. body_format picks the export type ("raw" gives a byte-exact .eml). Stateless mode without GCS staging returns it inline. Requires format="full" |
+| include_headers | boolean | no | true | false omits the Subject/From/To/Date summary (attached messages' too) and, with full=true, names the export after the message ID. Requires format="full"; body_format="raw" only when exported to a file |
 
 ### get_gmail_messages_content_batch
 Get content of multiple messages in one request. Auto-batches in chunks of 25.

@@ -388,6 +388,7 @@ async def _export_full_message(
     headers: Dict[str, str],
     body_format: Literal["text", "html", "raw"],
     declared_size: Optional[int] = None,
+    include_headers: bool = True,
 ) -> str:
     """
     Return a message's complete, untruncated content: saved to storage and
@@ -406,12 +407,14 @@ async def _export_full_message(
         headers: Already-fetched message headers, used for the summary and filename.
         body_format: "raw" saves the byte-exact RFC 5322 message as .eml,
             "html" saves the raw HTML body, "text" saves the plaintext body.
+        include_headers: When False, omit the header summary and name the file
+            after the message ID instead of the subject.
 
     Returns:
         str: Header summary plus the saved file's URL or path (or the inline body in
             stateless mode), or an "Error:" string.
     """
-    subject = headers.get("Subject", "message") or "message"
+    file_stem = (headers.get("Subject") if include_headers else message_id) or "message"
     notes: List[str] = []
 
     # Gmail's full/raw endpoints return their payload as one JSON response, so
@@ -420,7 +423,7 @@ async def _export_full_message(
     try:
         ensure_within_file_size_limit(
             declared_size,
-            file_name=subject,
+            file_name=file_stem,
             file_id=message_id,
             kind="message export",
         )
@@ -493,7 +496,7 @@ async def _export_full_message(
     try:
         ensure_within_file_size_limit(
             len(content_bytes),
-            file_name=subject,
+            file_name=file_stem,
             file_id=message_id,
             kind="message export",
         )
@@ -512,7 +515,7 @@ async def _export_full_message(
 
     size_bytes = len(content_bytes)
     size_kb = size_bytes / 1024
-    result_lines = _format_message_header_lines(headers)
+    result_lines = _format_message_header_lines(headers) if include_headers else []
     result_lines.append(
         "\n--- FULL MESSAGE ---" if stateless else "\n--- FULL MESSAGE EXPORT ---"
     )
@@ -544,7 +547,7 @@ async def _export_full_message(
     def _save_export():
         return storage.save_attachment_bytes(
             file_bytes=content_bytes,
-            filename=f"{subject[:80]}{extension}",
+            filename=f"{file_stem[:80]}{extension}",
             mime_type=mime_type,
         )
 
@@ -860,7 +863,9 @@ ATTACHED_MESSAGE_HEADER_LIMIT = 1000
 
 
 def _render_attached_messages(
-    payload: dict, body_format: Literal["text", "html"] = "text"
+    payload: dict,
+    body_format: Literal["text", "html"] = "text",
+    include_headers: bool = True,
 ) -> str:
     """Render emails wrapped inside this one (message/rfc822 parts) as text.
 
@@ -873,7 +878,7 @@ def _render_attached_messages(
     """
     blocks: List[str] = []
     counts = {"shown": 0, "over_limit": 0, "too_deep": 0}
-    names = ["From", "To", "Cc", "Subject", "Date"]
+    names = ["From", "To", "Cc", "Subject", "Date"] if include_headers else []
 
     # Depth counts attached messages only; ordinary MIME nesting uses the stack.
     pending = [(child, 1) for child in reversed(payload.get("parts") or [])]
@@ -1888,6 +1893,7 @@ async def get_gmail_message_content(
         ),
     ] = False,
     format: Literal["full", "metadata"] = "full",
+    include_headers: bool = True,
 ) -> str:
     """
     Retrieves the full content (subject, sender, recipients, body) of a specific Gmail message.
@@ -1918,6 +1924,10 @@ async def get_gmail_message_content(
             instead; with GCS staging it is saved and returned as a signed URL.
         format (Literal["full", "metadata"]): Message format. "full" (default) includes
             the body and attachments, "metadata" only headers.
+        include_headers (bool): When False, omit the Subject/From/To/Date header
+            summary (attached messages' too), and with full=True name the export
+            after the message ID. Requires format='full'; body_format='raw' is only
+            allowed when the raw message is exported to a file.
 
     Returns:
         str: The message details including subject, sender, date, Message-ID, recipients
@@ -1933,6 +1943,17 @@ async def get_gmail_message_content(
     _validate_message_format_options(format, body_format)
     if format == "metadata" and full:
         raise UserInputError("full=True requires format='full'.")
+    if format == "metadata" and not include_headers:
+        raise UserInputError("include_headers=False requires format='full'.")
+    if (
+        not include_headers
+        and body_format == "raw"
+        and (not full or (is_stateless_mode() and not gcs_files_enabled()))
+    ):
+        raise UserInputError(
+            "include_headers=False cannot hide the headers in inline raw MIME; "
+            "use body_format='text' or a full=True file export."
+        )
 
     # Fetch message metadata first to get headers
     message_metadata = await asyncio.to_thread(
@@ -1951,8 +1972,9 @@ async def get_gmail_message_content(
         message_metadata.get("payload", {}), GMAIL_METADATA_HEADERS
     )
 
+    content_lines = _format_message_header_lines(headers) if include_headers else []
     if format == "metadata":
-        return "\n".join(_format_message_header_lines(headers))
+        return "\n".join(content_lines)
 
     # Full export: hand back a file reference instead of the (truncated) body.
     if full:
@@ -1962,6 +1984,7 @@ async def get_gmail_message_content(
             headers,
             body_format,
             declared_size=message_metadata.get("sizeEstimate"),
+            include_headers=include_headers,
         )
 
     # Handle raw format separately - fetch with format="raw" and return decoded MIME
@@ -1974,7 +1997,6 @@ async def get_gmail_message_content(
         )
         decoded_raw = _decode_raw_mime_content(message_raw.get("raw", ""))
 
-        content_lines = _format_message_header_lines(headers)
         content_lines.append(f"\n--- RAW MIME ---\n{decoded_raw}")
         return "\n".join(content_lines)
 
@@ -2002,10 +2024,9 @@ async def get_gmail_message_content(
     # Extract attachment metadata
     attachments = _extract_attachments(payload)
 
-    content_lines = _format_message_header_lines(headers)
     content_lines.append(
         f"\n--- BODY ---\n{body_data or '[No text/plain body found]'}"
-        f"{_render_attached_messages(payload, body_format)}"
+        f"{_render_attached_messages(payload, body_format, include_headers)}"
     )
 
     # Add attachment information if present
