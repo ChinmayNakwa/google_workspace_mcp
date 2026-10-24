@@ -145,15 +145,15 @@ List all comments on a presentation.
 | max_comments | integer | no | 100 | Cap on comments returned; must be at least 1. Default comes from `WORKSPACE_MCP_COMMENTS_MAX`; unset, invalid, or non-positive values fall back to 100 |
 
 ### manage_presentation_comment
-Create, reply to, or resolve a comment.
+Create, reply to, resolve, edit, or delete a comment.
 
 | Parameter | Type | Required | Default | Notes |
 |-----------|------|----------|---------|-------|
 | user_google_email | string | yes | | |
 | presentation_id | string | yes | | |
-| action | string | yes | | `create`, `reply`, or `resolve` |
-| comment_content | string | for create/reply | | Comment text |
-| comment_id | string | for reply/resolve | | Target comment ID |
+| action | string | yes | | `create`, `reply`, `resolve`, `update`, or `delete` |
+| comment_content | string | for create/reply/update | | Comment text |
+| comment_id | string | for reply/resolve/update/delete | | Target comment ID |
 
 ---
 
