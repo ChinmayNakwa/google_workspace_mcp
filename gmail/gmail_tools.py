@@ -92,6 +92,7 @@ from gmail.gmail_helpers import (
     build_label_color,
     decode_part_body,
     format_filter_apply_result,
+    format_html_links,
     format_thread_label_outcomes,
     html_newlines_to_br,
     html_to_text_preserving_breaks,
@@ -115,6 +116,10 @@ DIRECTION_DESCRIPTION = (
     "Base text direction of the body. 'auto' (default) takes it from the first "
     "strong character (a right-to-left script gives 'rtl', anything else 'ltr'); "
     "'ltr'/'rtl' force it. On a forward it orients the note."
+)
+INCLUDE_LINKS_DESCRIPTION = (
+    "When True, append a LINKS section listing the http(s) URLs from the HTML "
+    "body that the text output omits. Only applies to body_format='text'."
 )
 
 # Keep ``None`` valid at runtime without publishing it as an ``anyOf`` branch.
@@ -242,6 +247,7 @@ def _format_body_content(
     text_body: str,
     html_body: str,
     body_format: Literal["text", "html"] = "text",
+    include_links: bool = False,
 ) -> str:
     """
     Helper function to format message body content with HTML fallback and truncation.
@@ -252,6 +258,7 @@ def _format_body_content(
         html_body: HTML body content
         body_format: Output format - "text" converts HTML to plaintext (default),
                      "html" returns raw HTML body as-is
+        include_links: In text mode, append the HTML body's http(s) links missing from the text
 
     Returns:
         Formatted body content string
@@ -293,14 +300,14 @@ def _format_body_content(
     )
 
     if use_html:
-        content = html_text
-        if len(content) > HTML_BODY_TRUNCATE_LIMIT:
-            content = content[:HTML_BODY_TRUNCATE_LIMIT] + "\n\n[Content truncated...]"
-        return content
+        content = _truncate_content(html_text, HTML_BODY_TRUNCATE_LIMIT)
     elif text_stripped:
-        return text_body
+        content = text_body
     else:
-        return "[No readable content found]"
+        content = "[No readable content found]"
+    if include_links:
+        content += format_html_links(html_stripped, content, HTML_BODY_TRUNCATE_LIMIT)
+    return content
 
 
 def _truncate_content(content: str, limit: int) -> str:
@@ -385,6 +392,7 @@ async def _export_full_message(
     body_format: Literal["text", "html", "raw"],
     declared_size: Optional[int] = None,
     include_headers: bool = True,
+    include_links: bool = False,
 ) -> str:
     """
     Return a message's complete, untruncated content: saved to storage and
@@ -480,6 +488,8 @@ async def _export_full_message(
                 content_str = _html_to_text(html_body)
             else:
                 content_str = ""
+            if include_links:
+                content_str += format_html_links(html_body, content_str)
             mime_type = "text/plain"
             extension = ".txt"
 
@@ -862,6 +872,7 @@ def _render_attached_messages(
     payload: dict,
     body_format: Literal["text", "html"] = "text",
     include_headers: bool = True,
+    include_links: bool = False,
 ) -> str:
     """Render emails wrapped inside this one (message/rfc822 parts) as text.
 
@@ -893,9 +904,13 @@ def _render_attached_messages(
             # Fall back to the rfc822 part's headers if the inner root lacks them.
             headers = _extract_headers(inner, names) or _extract_headers(child, names)
             bodies = _extract_message_bodies(inner)
-            body = _format_body_content(
-                bodies.get("text", ""), bodies.get("html", ""), body_format
+            html_body = bodies.get("html", "")
+            body = _truncate_content(
+                _format_body_content(bodies.get("text", ""), html_body, body_format),
+                HTML_BODY_TRUNCATE_LIMIT,
             )
+            if include_links and body_format == "text":
+                body += format_html_links(html_body, body, HTML_BODY_TRUNCATE_LIMIT)
             lines = [
                 f"--- ATTACHED MESSAGE {counts['shown']} (headers as claimed "
                 "by the attachment, unverified) ---"
@@ -906,7 +921,7 @@ def _render_attached_messages(
                     if len(value) > ATTACHED_MESSAGE_HEADER_LIMIT:
                         value = value[:ATTACHED_MESSAGE_HEADER_LIMIT] + " [truncated]"
                     lines.append(f"{name}: {value}")
-            lines += ["", _truncate_content(body, HTML_BODY_TRUNCATE_LIMIT)]
+            lines += ["", body]
             blocks.append("\n".join(lines))
             child = inner
             depth += 1
@@ -1890,6 +1905,9 @@ async def get_gmail_message_content(
     ] = False,
     format: Literal["full", "metadata"] = "full",
     include_headers: bool = True,
+    include_links: Annotated[
+        bool, Field(description=INCLUDE_LINKS_DESCRIPTION)
+    ] = False,
 ) -> str:
     """
     Retrieves the full content (subject, sender, recipients, body) of a specific Gmail message.
@@ -1924,6 +1942,7 @@ async def get_gmail_message_content(
             summary (attached messages' too), and with full=True name the export
             after the message ID. Requires format='full'; body_format='raw' is only
             allowed when the raw message is exported to a file.
+        include_links (bool): Append the HTML body's http(s) links missing from the text output.
 
     Returns:
         str: The message details including subject, sender, date, Message-ID, recipients
@@ -1981,6 +2000,7 @@ async def get_gmail_message_content(
             body_format,
             declared_size=message_metadata.get("sizeEstimate"),
             include_headers=include_headers,
+            include_links=include_links,
         )
 
     # Handle raw format separately - fetch with format="raw" and return decoded MIME
@@ -2015,14 +2035,18 @@ async def get_gmail_message_content(
     html_body = bodies.get("html", "")
 
     # Format body content with HTML fallback
-    body_data = _format_body_content(text_body, html_body, body_format=body_format)
+    body_data = _format_body_content(
+        text_body, html_body, body_format=body_format, include_links=include_links
+    )
 
     # Extract attachment metadata
     attachments = _extract_attachments(payload)
 
+    attached = _render_attached_messages(
+        payload, body_format, include_headers, include_links
+    )
     content_lines.append(
-        f"\n--- BODY ---\n{body_data or '[No text/plain body found]'}"
-        f"{_render_attached_messages(payload, body_format, include_headers)}"
+        f"\n--- BODY ---\n{body_data or '[No text/plain body found]'}{attached}"
     )
 
     # Add attachment information if present
@@ -2069,6 +2093,9 @@ async def get_gmail_messages_content_batch(
             ),
         ),
     ] = "text",
+    include_links: Annotated[
+        bool, Field(description=INCLUDE_LINKS_DESCRIPTION)
+    ] = False,
 ) -> str:
     """
     Retrieves the content of multiple Gmail messages in a single batch request.
@@ -2082,6 +2109,7 @@ async def get_gmail_messages_content_batch(
             "text" (default) returns plaintext (HTML converted to text as fallback).
             "html" returns the raw HTML body as-is without conversion.
             "raw" fetches the full raw MIME message and returns the base64url-decoded content.
+        include_links (bool): Append the HTML body's http(s) links missing from the text output.
 
     Returns:
         str: A formatted list of message contents including subject, sender, date, Message-ID, recipients (To, Cc), and body (if full format).
@@ -2216,8 +2244,13 @@ async def get_gmail_messages_content_batch(
                         text_body = bodies.get("text", "")
                         html_body = bodies.get("html", "")
                         body_data = _format_body_content(
-                            text_body, html_body, body_format=body_format
-                        ) + _render_attached_messages(payload, body_format)
+                            text_body,
+                            html_body,
+                            body_format=body_format,
+                            include_links=include_links,
+                        ) + _render_attached_messages(
+                            payload, body_format, include_links=include_links
+                        )
                         body_label = "BODY"
 
                     attachments = _extract_attachments(payload)
@@ -3644,6 +3677,7 @@ def _format_thread_content(
     thread_id: str,
     body_format: Literal["text", "html", "raw"] = "text",
     raw_contents: Optional[Dict[str, str]] = None,
+    include_links: bool = False,
 ) -> str:
     """
     Helper function to format thread content from Gmail API response.
@@ -3653,6 +3687,7 @@ def _format_thread_content(
         thread_id (str): Thread ID for display
         body_format: Output format - "text" (default), "html", or "raw"
         raw_contents: Optional mapping of message IDs to decoded raw MIME content
+        include_links: In text mode, append each body's http(s) links missing from the text
 
     Returns:
         str: Formatted thread content
@@ -3703,8 +3738,13 @@ def _format_thread_content(
 
             # Format body content with HTML fallback
             body_data = _format_body_content(
-                text_body, html_body, body_format=body_format
-            ) + _render_attached_messages(payload, body_format)
+                text_body,
+                html_body,
+                body_format=body_format,
+                include_links=include_links,
+            ) + _render_attached_messages(
+                payload, body_format, include_links=include_links
+            )
             body_label = "BODY"
 
         # Extract attachment metadata for this message
@@ -3804,6 +3844,9 @@ async def get_gmail_thread_content(
             ),
         ),
     ] = False,
+    include_links: Annotated[
+        bool, Field(description=INCLUDE_LINKS_DESCRIPTION)
+    ] = False,
 ) -> "str | Dict[str, Any]":
     """
     Retrieves the complete content of a Gmail conversation thread, including all messages.
@@ -3823,6 +3866,7 @@ async def get_gmail_thread_content(
             formatted thread content and structured ownership analysis. When
             False (default), returns the formatted content string (existing
             behavior, unchanged).
+        include_links (bool): Append the HTML body's http(s) links missing from the text output.
 
     Returns:
         str: When `include_analysis=False` (default). The complete thread
@@ -3858,6 +3902,7 @@ async def get_gmail_thread_content(
         thread_id,
         body_format=body_format,
         raw_contents=raw_contents,
+        include_links=include_links,
     )
 
     if not include_analysis:
@@ -3895,6 +3940,9 @@ async def get_gmail_threads_content_batch(
             ),
         ),
     ] = "text",
+    include_links: Annotated[
+        bool, Field(description=INCLUDE_LINKS_DESCRIPTION)
+    ] = False,
 ) -> str:
     """
     Retrieves the content of multiple Gmail threads in a single batch request.
@@ -3907,6 +3955,7 @@ async def get_gmail_threads_content_batch(
             "text" (default) returns plaintext (HTML converted to text as fallback).
             "html" returns the raw HTML body as-is without conversion.
             "raw" fetches each message's full raw MIME content and returns the base64url-decoded body.
+        include_links (bool): Append the HTML body's http(s) links missing from the text output.
 
     Returns:
         str: A formatted list of thread contents with separators.
@@ -4012,6 +4061,7 @@ async def get_gmail_threads_content_batch(
                         tid,
                         body_format=body_format,
                         raw_contents=raw_contents,
+                        include_links=include_links,
                     )
                 )
 

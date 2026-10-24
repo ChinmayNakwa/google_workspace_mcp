@@ -6,6 +6,7 @@ import asyncio
 import base64
 import codecs
 import contextlib
+import itertools
 import logging
 import re
 import secrets
@@ -823,6 +824,83 @@ def html_to_text_preserving_breaks(html_content: str) -> str:
         return parser.get_text()
     except Exception:
         return html_content
+
+
+class _HTMLLinkExtractor(HTMLParser):
+    """Collect http(s) anchor URLs mapped to their visible text, in document order."""
+
+    def __init__(self):
+        super().__init__()
+        self.links: Dict[str, str] = {}
+        self._href: Optional[str] = None
+        self._text: List[str] = []
+
+    def _flush(self) -> None:
+        if self._href is not None and not self.links.get(self._href):
+            self.links[self._href] = " ".join("".join(self._text).split())
+        self._href = None
+        self._text = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "br":
+            self.handle_data(" ")
+        if tag != "a":
+            return
+        self._flush()
+        href = re.sub(r"[\t\n\r]", "", dict(attrs).get("href") or "").strip()
+        if href.lower().startswith(("http://", "https://")):
+            self._href = href
+
+    def handle_endtag(self, tag):
+        if tag == "a":
+            self._flush()
+
+    def handle_data(self, data):
+        if self._href is not None:
+            self._text.append(data)
+
+    def parse_marked_section(self, i, report=1):
+        # Older CPython patch releases raise on unknown <![...]> sections.
+        try:
+            return super().parse_marked_section(i, report)
+        except AssertionError:
+            return self.parse_bogus_comment(i)
+
+    def close(self):
+        super().close()
+        self._flush()
+
+
+_TEXT_URL_RE = re.compile(r"https?://[^\s<>\"]+", re.IGNORECASE)
+
+
+def format_html_links(
+    html_body: str, known_text: str, limit: Optional[int] = None
+) -> str:
+    """Return a LINKS section of http(s) anchors missing from ``known_text``, capped at ``limit``."""
+    if not html_body:
+        return ""
+    parser = _HTMLLinkExtractor()
+    parser.feed(html_body)
+    parser.close()
+    shown = {
+        url
+        for token in _TEXT_URL_RE.findall(known_text)
+        for url in (token, token.rstrip(".,;:!?)]"))
+    }
+    lines = [
+        f"- {text}: {url}" if text and text != url else f"- {url}"
+        for url, text in parser.links.items()
+        if url not in shown
+    ]
+    if limit is not None:
+        kept = sum(
+            size <= limit
+            for size in itertools.accumulate(len(line) + 1 for line in lines)
+        )
+        if kept < len(lines):
+            lines = lines[:kept] + [f"[{len(lines) - kept} more links omitted]"]
+    return "\n\n--- LINKS ---\n" + "\n".join(lines) if lines else ""
 
 
 _HTML_BLOCK_TAGS = frozenset(
