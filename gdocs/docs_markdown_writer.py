@@ -27,6 +27,7 @@ from gdocs.docs_helpers import (
 )
 
 _NORMAL_TEXT = {"namedStyleType": "NORMAL_TEXT"}
+_BLOCK_GAP = {"spaceBelow": {"magnitude": 12, "unit": "PT"}}
 _DOCS_MAX_TABLE_ROWS = 1000
 _DOCS_MAX_TABLE_COLS = 20
 
@@ -93,7 +94,6 @@ def _emit_requests(tokens, requests, tab_id, start_index):
                 )
             )
             requests.extend(inline_styles)
-            _append_spacer(requests, cursor, tab_id)
             i += 3
             continue
 
@@ -152,7 +152,7 @@ def _emit_requests(tokens, requests, tab_id, start_index):
                     }
                 }
             )
-            _append_spacer(requests, cursor, tab_id)
+            _append_block_gap(requests, list_start, list_end, tab_id)
             i = j + 1
             continue
 
@@ -160,9 +160,6 @@ def _emit_requests(tokens, requests, tab_id, start_index):
             content = tok.content
             start_idx = cursor[0]
             # Ensure exactly one trailing newline to end the code paragraph.
-            # The universal spacer paragraph below supplies the visual gap;
-            # adding a second newline here would leave fenced blocks with one
-            # more blank line than other top-level blocks.
             text = content if content.endswith("\n") else content + "\n"
             requests.append(_build_insert_text(cursor[0], text, tab_id))
             cursor[0] += _utf16_len(text)
@@ -179,7 +176,7 @@ def _emit_requests(tokens, requests, tab_id, start_index):
                 "weightedFontFamily",
                 tab_id,
             )
-            _append_spacer(requests, cursor, tab_id)
+            _append_block_gap(requests, start_idx, cursor[0], tab_id)
             i += 1
             continue
 
@@ -233,7 +230,7 @@ def _emit_requests(tokens, requests, tab_id, start_index):
                     tab_id,
                 )
             )
-            _append_spacer(requests, cursor, tab_id)
+            _append_block_gap(requests, quote_start, quote_end, tab_id)
             i = j + 1
             continue
 
@@ -245,7 +242,6 @@ def _emit_requests(tokens, requests, tab_id, start_index):
         if tok.type == "table_open":
             row_cells, i = _collect_table_cells(tokens, i)
             _emit_table(row_cells, requests, cursor, tab_id)
-            _append_spacer(requests, cursor, tab_id)
             i += 1
             continue
 
@@ -263,9 +259,7 @@ def _emit_requests(tokens, requests, tab_id, start_index):
                 _build_paragraph_style(range_start, cursor[0], _NORMAL_TEXT, tab_id)
             )
             requests.extend(inline_styles)
-            # Only top-level paragraphs receive spacers - list-item paragraphs
-            # and blockquote paragraphs dispatch inside their own branches.
-            _append_spacer(requests, cursor, tab_id)
+            _append_block_gap(requests, range_start, cursor[0], tab_id)
             i += 3  # skip paragraph_open, inline, paragraph_close
             continue
 
@@ -308,6 +302,10 @@ def _emit_table(row_cells, requests, cursor, tab_id):
         requests.append(_build_paragraph_style(start, cursor[0], _NORMAL_TEXT, tab_id))
         return
 
+    if requests and requests[-1] == _build_paragraph_style(
+        start - 1, start, _BLOCK_GAP, tab_id
+    ):
+        requests.pop()
     requests.append(_build_insert_table(start, rows, cols, tab_id))
     requests.append(_build_paragraph_style(start, start + 1, _NORMAL_TEXT, tab_id))
     stride = 1 + 2 * cols
@@ -522,6 +520,14 @@ def _append_spacer(
     requests.append(
         _build_paragraph_style(cursor[0] - 1, cursor[0], _NORMAL_TEXT, tab_id)
     )
+
+
+def _append_block_gap(
+    requests: list[dict], start: int, end: int, tab_id: Optional[str]
+) -> None:
+    """Append spaceBelow on the last paragraph of a non-empty block."""
+    if end > start:
+        requests.append(_build_paragraph_style(end - 1, end, _BLOCK_GAP, tab_id))
 
 
 def build_markdown_insert_requests(

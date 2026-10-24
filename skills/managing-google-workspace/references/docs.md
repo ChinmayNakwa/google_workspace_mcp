@@ -292,15 +292,15 @@ List all comments on a document.
 | max_comments | integer | no | 100 | Cap on comments returned; must be at least 1. Default comes from `WORKSPACE_MCP_COMMENTS_MAX`; unset, invalid, or non-positive values fall back to 100 |
 
 ### manage_document_comment
-Create, reply to, or resolve a comment.
+Create, reply to, resolve, edit, or delete a comment.
 
 | Parameter | Type | Required | Default | Notes |
 |-----------|------|----------|---------|-------|
 | user_google_email | string | yes | | |
 | document_id | string | yes | | |
-| action | string | yes | | `create`, `reply`, or `resolve` |
-| comment_content | string | no | | Required for `create` and `reply` |
-| comment_id | string | no | | Required for `reply` and `resolve` |
+| action | string | yes | | `create`, `reply`, `resolve`, `update`, or `delete` |
+| comment_content | string | no | | Required for `create`, `reply`, and `update` |
+| comment_id | string | no | | Required for `reply`, `resolve`, `update`, and `delete` |
 
 ---
 
@@ -367,6 +367,7 @@ Execute multiple operations atomically in a single API call. Each operation is a
 | `update_paragraph_style` | `start_index`, `end_index` | `heading_level` (0-6), `alignment`, `line_spacing`, `indent_first_line`, `indent_start`, `indent_end`, `space_above`, `space_below` |
 | `insert_table` | `index`, `rows`, `columns` | |
 | `insert_page_break` | `index` | |
+| `insert_person` | `email`, plus one of `index`, `end_of_segment=true`, `after_heading`, `before_heading` or `anchor_text` | `anchor_position`, `segment_id` (inserts an @mention smart chip) |
 | `find_replace` | `find_text`, `replace_text` | `match_case` |
 | `create_bullet_list` | `start_index`, `end_index` | `list_type` (`UNORDERED`/`ORDERED`/`NONE`), `nesting_level` (0-8), `paragraph_start_indices` |
 | `insert_doc_tab` | `title`, `index` | `parent_tab_id` |
@@ -393,4 +394,4 @@ Use `list_type='NONE'` in `create_bullet_list` to remove existing list formattin
 
 **Tab operations**: Use `inspect_doc_structure` (without `tab_id`) to discover available tabs and their IDs. Then pass `tab_id` to editing tools or to `inspect_doc_structure` again to get structure within a specific tab.
 
-**Comments**: `get_doc_as_markdown` with `comment_mode: "inline"` gives the most useful view of comments in context. Use `list_document_comments` for structured comment data, and `manage_document_comment` to create, reply, or resolve.
+**Comments**: `get_doc_as_markdown` with `comment_mode: "inline"` gives the most useful view of comments in context. Use `list_document_comments` for structured comment data, and `manage_document_comment` to create, reply, resolve, edit, or delete.
