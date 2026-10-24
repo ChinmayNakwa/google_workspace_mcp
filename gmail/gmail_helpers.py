@@ -23,6 +23,7 @@ import httplib2
 from fastmcp.exceptions import ToolError as ToolExecutionError
 from googleapiclient.errors import HttpError
 
+from core.file_limits import FileTooLargeError, ensure_within_file_size_limit
 from core.utils import UserInputError
 from gmail.gmail_web_mime import (
     TextDirection,
@@ -337,6 +338,54 @@ async def _fetch_with_retry(
 
     logger.error(f"[{log_prefix}] Failed to fetch {item_label} {item_id}: {last_error}")
     return item_id, None, last_error
+
+
+async def _fetch_body_data(
+    service, message_id: Optional[str], attachment_id: str, body: Dict[str, Any]
+) -> None:
+    """Store an attachment-backed body part's data on ``body`` when it can be fetched."""
+    try:
+        ensure_within_file_size_limit(
+            body.get("size"), file_id=attachment_id, kind="message body"
+        )
+    except FileTooLargeError as error:
+        logger.warning(f"Skipping message body of {message_id}: {error}")
+        return
+    _, response, _ = await _fetch_with_retry(
+        lambda: (
+            service.users()
+            .messages()
+            .attachments()
+            .get(userId="me", messageId=message_id, id=attachment_id)
+        ),
+        item_id=attachment_id,
+        item_label="message body",
+        log_prefix="fetch_attachment_backed_bodies",
+    )
+    if response and response.get("data"):
+        body["data"] = response["data"]
+
+
+async def fetch_attachment_backed_bodies(
+    service, messages: Iterable[Mapping[str, Any]]
+) -> None:
+    """Fill in the text/plain and text/html bodies Gmail stores behind an attachmentId."""
+    for message in messages:
+        pending = [message.get("payload") or {}]
+        wanted = {"text/plain", "text/html"}
+        while pending and wanted:
+            part = pending.pop(0)
+            mime_type = part.get("mimeType", "")
+            body = part.get("body") or {}
+            attachment_id = None if part.get("filename") else body.get("attachmentId")
+            if mime_type in wanted and (body.get("data") or attachment_id):
+                wanted.discard(mime_type)
+                if not body.get("data"):
+                    await _fetch_body_data(
+                        service, message.get("id"), attachment_id, body
+                    )
+            if mime_type.startswith("multipart/"):
+                pending.extend(part.get("parts") or [])
 
 
 async def send_message_once(service, send_body: Dict[str, Any]) -> Dict[str, Any]:
@@ -791,7 +840,8 @@ class _HTMLBlockTextExtractor(HTMLParser):
 
 def decode_part_body(part: Mapping[str, Any]) -> str:
     """Decode a Gmail payload part's inline body using its declared charset."""
-    raw = base64.urlsafe_b64decode(part["body"]["data"])
+    data = part["body"]["data"]
+    raw = base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
     headers = Message()
     for header in part.get("headers", []):
         headers[header["name"]] = header["value"]

@@ -92,6 +92,7 @@ from gmail.gmail_helpers import (
     apply_gmail_filter_to_existing,
     build_label_color,
     decode_part_body,
+    fetch_attachment_backed_bodies,
     format_filter_apply_result,
     format_html_links,
     format_thread_label_outcomes,
@@ -459,6 +460,7 @@ async def _export_full_message(
             .get(userId="me", id=message_id, format="full")
             .execute
         )
+        await fetch_attachment_backed_bodies(service, [message_full])
         bodies = _extract_message_bodies(message_full.get("payload", {}))
         # Preserve the body exactly — the export must be complete — so use .strip()
         # only to test for emptiness, never to trim the content that gets saved.
@@ -1046,6 +1048,7 @@ async def _fetch_thread_reply_context(
             "date": headers.get("Date", ""),
         }
         if include_bodies:
+            await fetch_attachment_backed_bodies(service, [msg])
             bodies = _extract_message_bodies(payload)
             context["text_body"] = bodies.get("text", "")
             context["html_body"] = bodies.get("html", "")
@@ -2027,6 +2030,7 @@ async def get_gmail_message_content(
     )
 
     # Extract both text and HTML bodies using enhanced helper function
+    await fetch_attachment_backed_bodies(service, [message_full])
     payload = message_full.get("payload", {})
     bodies = _extract_message_bodies(payload)
     text_body = bodies.get("text", "")
@@ -2238,6 +2242,7 @@ async def get_gmail_messages_content_batch(
                         body_label = "RAW MIME"
                     else:
                         # Full format - extract body too
+                        await fetch_attachment_backed_bodies(service, [message])
                         bodies = _extract_message_bodies(payload)
                         text_body = bodies.get("text", "")
                         html_body = bodies.get("html", "")
@@ -3095,6 +3100,7 @@ async def _forward_gmail_message_impl(
         .get(userId="me", id=message_id, format="full")
         .execute
     )
+    await fetch_attachment_backed_bodies(service, [original_message])
 
     payload = original_message.get("payload", {})
 
@@ -3894,6 +3900,10 @@ async def get_gmail_thread_content(
         raw_contents = await _fetch_raw_message_contents(
             service, message_ids, log_prefix="get_gmail_thread_content"
         )
+    else:
+        await fetch_attachment_backed_bodies(
+            service, thread_response.get("messages", [])
+        )
 
     content = _format_thread_content(
         thread_response,
@@ -4051,6 +4061,10 @@ async def get_gmail_threads_content_batch(
                         service,
                         message_ids,
                         log_prefix="get_gmail_threads_content_batch",
+                    )
+                else:
+                    await fetch_attachment_backed_bodies(
+                        service, thread.get("messages", [])
                     )
 
                 output_threads.append(
